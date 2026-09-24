@@ -7,7 +7,8 @@
  */
 import "./load-env";
 import { asc, count, eq } from "drizzle-orm";
-import { runAgent, type RunOutcome } from "../src/server/agent/loop";
+import { defaultLimits, runAgent, type RunOutcome } from "../src/server/agent/loop";
+import { getLlm } from "../src/server/llm/anthropic";
 import { getDb } from "../src/server/db/client";
 import { agentRuns, leads, type AgentStep } from "../src/server/db/schema";
 import { SEED_LEADS } from "../src/server/db/seed-data";
@@ -24,6 +25,8 @@ const yellow = c(33);
 const blue = c(34);
 const magenta = c(35);
 const cyan = c(36);
+
+const CLI_TIME_BUDGET_MS = 180_000;
 
 const usd = (n: number) => `$${n.toFixed(4)}`;
 const ms = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${n}ms`);
@@ -146,12 +149,16 @@ async function main() {
   console.log(`  says   ${dim(short(lead.message, 160))}`);
   console.log(dim("─".repeat(80)));
 
-  // Local CLI isn't bound by Vercel's 60s function limit (routes keep RUN_TIME_BUDGET_MS).
+  // Local CLI isn't bound by Vercel's 60s function limit (routes keep RUN_TIME_BUDGET_MS);
+  // local models get LOCAL_RUN_TIME_BUDGET_MS when that is longer.
+  const llm = getLlm();
+  const timeBudgetMs = Math.max(CLI_TIME_BUDGET_MS, defaultLimits(llm).timeBudgetMs);
   const outcome = await runAgent({
     leadId,
     trigger,
+    llm,
     onStep: printStep,
-    limits: { timeBudgetMs: 180_000 },
+    limits: { timeBudgetMs },
   });
   printOutcome(outcome);
   const [after] = await db

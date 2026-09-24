@@ -4,6 +4,7 @@ import { approvals } from "../db/schema";
 import { isFlagged } from "./tools/helpers";
 import { findTool } from "./tools";
 import { ToolError, type ToolContext, type ToolResult } from "./types";
+import { INVALID_TOOL_ARGS } from "../llm/types";
 
 export type ToolExecution = {
   status: "ok" | "error" | "pending_approval";
@@ -29,6 +30,19 @@ export async function executeToolCall(
   const tool = findTool(name);
   if (!tool) {
     return { status: "error", input: rawInput, output: { error: `Unknown tool "${name}"` } };
+  }
+
+  const rawArgs = (rawInput as Record<string, unknown> | null)?.[INVALID_TOOL_ARGS];
+  if (typeof rawArgs === "string") {
+    return {
+      status: "error",
+      input: rawInput,
+      output: {
+        error: "Invalid input: the arguments are not a valid JSON object.",
+        received: rawArgs.slice(0, 500),
+        hint: `Call ${name} again with a JSON object that matches its schema.`,
+      },
+    };
   }
 
   const parsed = tool.input.safeParse(rawInput ?? {});

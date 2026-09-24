@@ -1,13 +1,14 @@
 import { getDb } from "../db/client";
 import { adapterHealth } from "../db/schema";
 
-export type ProviderName = "google" | "hubspot" | "resend" | "gemini";
+export type ProviderName = "google" | "hubspot" | "resend" | "gemini" | "openai-compatible";
 
 const LABEL: Record<ProviderName, string> = {
   google: "Google Calendar",
   hubspot: "HubSpot",
   resend: "Resend",
   gemini: "Gemini",
+  "openai-compatible": "OpenAI-compatible API",
 };
 
 /**

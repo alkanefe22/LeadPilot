@@ -72,13 +72,14 @@ export class LeadNotFoundError extends Error {
   }
 }
 
-export function defaultLimits(): RunLimits {
+/** Env limits; a local model (slower hardware, no serverless cap) gets LOCAL_RUN_TIME_BUDGET_MS. */
+export function defaultLimits(llm?: Pick<LlmClient, "billingTier">): RunLimits {
   const e = env();
   return {
     maxSteps: e.MAX_AGENT_STEPS,
     maxCostUsd: e.MAX_COST_PER_RUN_USD,
     maxTokens: e.LLM_MAX_TOKENS,
-    timeBudgetMs: e.RUN_TIME_BUDGET_MS,
+    timeBudgetMs: llm?.billingTier === "local" ? e.LOCAL_RUN_TIME_BUDGET_MS : e.RUN_TIME_BUDGET_MS,
   };
 }
 
@@ -112,8 +113,8 @@ export function isWorkComplete(state: RunState): boolean {
 export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
   const db = opts.db ?? getDb();
   const now = opts.now ?? (() => new Date());
-  const limits = { ...defaultLimits(), ...opts.limits };
   const llm = opts.llm ?? getLlm();
+  const limits = { ...defaultLimits(llm), ...opts.limits };
   const adapters = opts.adapters ?? getAdapters();
   // Priced per response: with Gemini fallbacks a step may be served by another model.
   const priceOf = (model: string) => priceFor(model, llm.priceOverride);
@@ -164,6 +165,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
         trigger: opts.trigger,
         model: llm.model,
         billingTier: llm.billingTier ?? null,
+        timeBudgetMs: limits.timeBudgetMs,
         startedAt: now(),
       })
       .returning({ id: agentRuns.id });

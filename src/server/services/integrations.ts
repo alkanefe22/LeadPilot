@@ -38,12 +38,13 @@ export async function getIntegrations(): Promise<IntegrationView[]> {
   });
 }
 
-/** Last error of the Gemini client (the only LLM that goes through providerFetch), if failing. */
+/** Last error of an LLM client that goes through providerFetch (Gemini, OpenAI-compatible). */
 export async function getLlmHealth(): Promise<string | null> {
-  if (resolveLlmProvider() !== "gemini") return null;
+  const provider = resolveLlmProvider();
+  if (provider !== "gemini" && provider !== "openai-compatible") return null;
   const [row] = await getDb()
     .select()
     .from(adapterHealth)
-    .where(eq(adapterHealth.provider, "gemini"));
+    .where(eq(adapterHealth.provider, provider));
   return row?.failing ? row.lastError : null;
 }

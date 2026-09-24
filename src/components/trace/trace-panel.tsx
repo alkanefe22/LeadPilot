@@ -215,7 +215,9 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
             hint={
               run.billingTier === "free"
                 ? "free tier — $0 actually billed"
-                : "estimated from token usage"
+                : run.billingTier === "local"
+                  ? "local model — nothing billed"
+                  : "estimated from token usage"
             }
           />
           <Stat

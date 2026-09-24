@@ -1,0 +1,1 @@
+ALTER TABLE "agent_runs" ADD COLUMN "time_budget_ms" integer;

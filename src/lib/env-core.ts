@@ -43,10 +43,11 @@ export const envSchema = z.object({
   ) as z.ZodType<string>,
 
   // LLM
-  // Which LLM runs the agent. Unset → Anthropic when its key+model exist, else Gemini.
+  // Which LLM runs the agent. Unset → the first configured of Anthropic, Gemini,
+  // OpenAI-compatible (see resolveLlmProvider).
   LLM_PROVIDER: z.preprocess(
     (v) => (v === "" ? undefined : v),
-    z.enum(["anthropic", "gemini"]).optional(),
+    z.enum(["anthropic", "gemini", "openai-compatible"]).optional(),
   ),
   ANTHROPIC_API_KEY: optionalString,
   ANTHROPIC_MODEL: optionalString,
@@ -93,6 +94,20 @@ export const envSchema = z.object({
   GEMINI_PRICE_INPUT_PER_MTOK: float,
   GEMINI_PRICE_OUTPUT_PER_MTOK: float,
 
+  // OpenAI-compatible Chat Completions API: Ollama, LM Studio, OpenAI, Groq, OpenRouter, …
+  OPENAI_COMPAT_BASE_URL: z.preprocess(
+    (v) => (v === undefined || v === "" ? "http://localhost:11434/v1" : v),
+    z.url(),
+  ) as z.ZodType<string>,
+  OPENAI_COMPAT_API_KEY: optionalString,
+  OPENAI_COMPAT_MODEL: optionalString,
+  // Optional reasoning_effort (thinking control; names are model-defined, e.g. "none" / "low").
+  OPENAI_COMPAT_REASONING_EFFORT: optionalString,
+  OPENAI_COMPAT_PRICE_INPUT_PER_MTOK: float,
+  OPENAI_COMPAT_PRICE_OUTPUT_PER_MTOK: float,
+  // Time budget for runs on a local model (localhost base URL): slower hardware, no serverless cap.
+  LOCAL_RUN_TIME_BUDGET_MS: int(300_000, 5_000, 3_600_000),
+
   // pnpm eval pacing (free-tier friendly defaults)
   EVAL_CONCURRENCY: int(1, 1, 16),
   EVAL_CALL_DELAY_MS: int(0, 0, 120_000),
@@ -104,6 +119,9 @@ export const envSchema = z.object({
   // Public demo deployments: always use the built-in calendar / CRM / email, even if real
   // integration keys are present. Real integrations are demoed from a local run instead.
   PUBLIC_DEMO_FORCE_MOCK: bool(false),
+  // What "Simulate lead" does for public visitors: "replay" = play back a recorded real run
+  // (no LLM calls, $0); "live" = run the agent. Default: replay when PUBLIC_DEMO=true.
+  DEMO_MODE: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["replay", "live"]).optional()),
   // Global daily budget for simulated (public demo) runs, UTC day.
   DEMO_DAILY_RUN_LIMIT: int(50, 0, 100_000),
   DEMO_DAILY_COST_LIMIT_USD: z.preprocess(
@@ -202,20 +220,45 @@ export function resetEnvCache() {
   cached = undefined;
 }
 
-export type LlmProvider = "anthropic" | "gemini";
+export type LlmProvider = "anthropic" | "gemini" | "openai-compatible";
 
 /**
  * Resolves the active LLM provider:
  *  - LLM_PROVIDER set → that provider (null if its key/model are missing)
- *  - otherwise Anthropic when ANTHROPIC_API_KEY + ANTHROPIC_MODEL exist,
- *    else Gemini when GEMINI_API_KEY + GEMINI_MODEL exist.
+ *  - otherwise the first configured of: Anthropic (ANTHROPIC_API_KEY + ANTHROPIC_MODEL),
+ *    Gemini (GEMINI_API_KEY + GEMINI_MODEL), OpenAI-compatible (OPENAI_COMPAT_MODEL; the
+ *    key is optional because local servers like Ollama don't need one).
  */
 export function resolveLlmProvider(e: Env = env()): LlmProvider | null {
-  const anthropic = Boolean(e.ANTHROPIC_API_KEY && e.ANTHROPIC_MODEL);
-  const gemini = Boolean(e.GEMINI_API_KEY && e.GEMINI_MODEL);
-  if (e.LLM_PROVIDER === "anthropic") return anthropic ? "anthropic" : null;
-  if (e.LLM_PROVIDER === "gemini") return gemini ? "gemini" : null;
-  return anthropic ? "anthropic" : gemini ? "gemini" : null;
+  const ready: Record<LlmProvider, boolean> = {
+    anthropic: Boolean(e.ANTHROPIC_API_KEY && e.ANTHROPIC_MODEL),
+    gemini: Boolean(e.GEMINI_API_KEY && e.GEMINI_MODEL),
+    "openai-compatible": Boolean(e.OPENAI_COMPAT_MODEL),
+  };
+  if (e.LLM_PROVIDER) return ready[e.LLM_PROVIDER] ? e.LLM_PROVIDER : null;
+  return (["anthropic", "gemini", "openai-compatible"] as const).find((p) => ready[p]) ?? null;
+}
+
+/** True for a server on this machine (Ollama, LM Studio): runs cost $0 and get a longer budget. */
+export function isLocalBaseUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host === "::1" ||
+      host === "0.0.0.0" ||
+      host === "host.docker.internal" ||
+      /^127\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Public-demo "Simulate lead" behavior (admins always run the agent live). */
+export function demoMode(e: Env = env()): "replay" | "live" {
+  return e.DEMO_MODE ?? (e.PUBLIC_DEMO ? "replay" : "live");
 }
 
 export function isLlmConfigured(e: Env = env()) {
@@ -229,5 +272,9 @@ export function llmLabel(e: Env = env()): string {
   if (p === "anthropic") return `Anthropic · ${e.ANTHROPIC_MODEL}`;
   if (p === "gemini")
     return `Gemini · ${e.GEMINI_MODEL} (${e.GEMINI_TIER === "free" ? "free tier" : "paid tier"})`;
+  if (p === "openai-compatible") {
+    const host = new URL(e.OPENAI_COMPAT_BASE_URL).host;
+    return `OpenAI-compatible · ${e.OPENAI_COMPAT_MODEL} (${isLocalBaseUrl(e.OPENAI_COMPAT_BASE_URL) ? `local, ${host}` : host})`;
+  }
   return e.LLM_PROVIDER ? `${e.LLM_PROVIDER} selected but key/model missing` : "not configured";
 }

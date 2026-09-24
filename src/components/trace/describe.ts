@@ -43,7 +43,9 @@ export function stepIcon(step: TraceStep): LucideIcon {
 export function stepTitle(step: TraceStep, model: string): string {
   if (step.type === "llm") {
     if (model === "dev-fake-llm") return "Agent (dev fake LLM)";
-    return model.startsWith("gemini") ? "Gemini" : "Claude";
+    if (model.startsWith("gemini")) return "Gemini";
+    if (model.startsWith("claude")) return "Claude";
+    return "Model";
   }
   if (step.type === "human") return isRejected(step) ? "Admin rejected" : "Admin approved";
   return TOOL_META[step.toolName ?? ""]?.label ?? step.toolName ?? "Tool";

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { isWorkComplete, runAgent } from "@/server/agent/loop";
+import { sweepStaleRuns } from "@/server/agent/runs";
 import type { Database } from "@/server/db/client";
 import { agentRuns } from "@/server/db/schema";
 import type { LlmClient, LlmRequest, LlmResponse } from "@/server/llm/types";
@@ -129,5 +130,26 @@ describe("time budget", () => {
         lastTurnHadErrors: true,
       }),
     ).toBe(false);
+  });
+
+  it("sweeps a stuck run only after its own recorded budget (+ grace), e.g. a 5-minute local run", async () => {
+    const lead = await createLead(db);
+    const [longRun] = await db
+      .insert(agentRuns)
+      .values({
+        leadId: lead.id,
+        trigger: "inbound",
+        model: "qwen3.5:9b",
+        timeBudgetMs: 300_000,
+        startedAt: new Date(Date.now() - 3 * 60_000),
+      })
+      .returning();
+    await sweepStaleRuns(db);
+    const [still] = await db.select().from(agentRuns).where(eq(agentRuns.id, longRun!.id));
+    expect(still!.status).toBe("running");
+
+    await sweepStaleRuns(db, undefined, new Date(Date.now() + 3 * 60_000)); // 6 min in
+    const [swept] = await db.select().from(agentRuns).where(eq(agentRuns.id, longRun!.id));
+    expect(swept).toMatchObject({ status: "failed", error: "timed out" });
   });
 });

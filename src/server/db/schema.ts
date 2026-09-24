@@ -184,7 +184,10 @@ export const agentRuns = pgTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     costUsd: usd("cost_usd"),
     // "free" when the provider billed $0 (Gemini free tier): cost_usd is then an estimate at paid rates.
+    // "local" for a model on this machine (Ollama, LM Studio): cost_usd is exactly 0.
     billingTier: text("billing_tier"),
+    // The run's wall-clock budget; the stale-run sweeper only fails runs past it (+ grace).
+    timeBudgetMs: integer("time_budget_ms"),
     latencyMs: integer("latency_ms").notNull().default(0),
     summary: text("summary"),
     error: text("error"),

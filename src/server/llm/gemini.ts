@@ -104,7 +104,7 @@ export type GeminiThinking = "minimal" | "low" | "medium" | "high" | "default";
  */
 export function thinkingConfigFor(model: string, level: GeminiThinking) {
   if (level === "default" || !/^gemini-3/.test(model)) return undefined;
-  const supportsMinimal = /flash-lite/.test(model) || /^gemini-3.[56]-flash/.test(model);
+  const supportsMinimal = /flash-lite/.test(model) || /^gemini-3\.[56]-flash/.test(model);
   const thinkingLevel = level === "minimal" && !supportsMinimal ? "low" : level;
   return { thinkingLevel };
 }

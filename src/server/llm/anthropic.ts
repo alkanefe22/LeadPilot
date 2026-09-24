@@ -1,7 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { env, resolveLlmProvider } from "@/lib/env";
+import { env, isLocalBaseUrl, resolveLlmProvider } from "@/lib/env";
 import { DevFakeLlm } from "./fake";
 import { GeminiClient } from "./gemini";
+import { OpenAiCompatClient } from "./openai-compat";
 import { LlmNotConfiguredError, type LlmClient, type LlmRequest, type LlmResponse } from "./types";
 
 export class AnthropicLlm implements LlmClient {
@@ -42,7 +43,7 @@ export class AnthropicLlm implements LlmClient {
   }
 }
 
-/** The configured LLM: Claude or Gemini (see resolveLlmProvider), or the dev fake. */
+/** The configured LLM: Claude, Gemini or OpenAI-compatible (see resolveLlmProvider), or the dev fake. */
 export type LlmOptions = {
   /** Batch jobs (eval) can wait longer for Gemini free-tier rate limits than a 60s function. */
   geminiRetries?: number;
@@ -67,6 +68,17 @@ export function getLlm(opts: LlmOptions = {}): LlmClient {
       },
       retries: opts.geminiRetries,
       maxRetryDelayMs: opts.geminiMaxRetryDelayMs,
+    });
+  }
+  if (provider === "openai-compatible") {
+    return new OpenAiCompatClient(e.OPENAI_COMPAT_MODEL!, e.OPENAI_COMPAT_BASE_URL, {
+      apiKey: e.OPENAI_COMPAT_API_KEY,
+      billingTier: isLocalBaseUrl(e.OPENAI_COMPAT_BASE_URL) ? "local" : "paid",
+      reasoningEffort: e.OPENAI_COMPAT_REASONING_EFFORT,
+      priceOverride: {
+        input: e.OPENAI_COMPAT_PRICE_INPUT_PER_MTOK,
+        output: e.OPENAI_COMPAT_PRICE_OUTPUT_PER_MTOK,
+      },
     });
   }
   if (provider === "anthropic") {
