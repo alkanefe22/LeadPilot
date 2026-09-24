@@ -1,13 +1,10 @@
 import { and, eq, gt, lt } from "drizzle-orm";
 import { newId } from "@/lib/ids";
-import { wallParts, zonedToUtc } from "@/lib/time";
+import { wallParts } from "@/lib/time";
 import { getDb } from "../../db/client";
 import { bookings } from "../../db/schema";
+import { generateSlots, overlaps, withinBusinessHours, type Interval } from "./slots";
 import type { AvailabilityQuery, CalendarAdapter, Slot } from "./types";
-
-const OPEN_HOUR = 9;
-const CLOSE_HOUR = 17;
-const STEP_MIN = 30;
 
 /** FNV-1a — deterministic "busy" hours so the demo calendar looks realistic but stable. */
 function hash(s: string) {
@@ -24,9 +21,14 @@ function isFakeBusy(start: Date, timeZone: string) {
   return hash(`${p.year}-${p.month}-${p.day}-${p.hour}`) % 4 === 0;
 }
 
-async function confirmedBookings(workspaceId: string, from: Date, to: Date) {
-  return getDb()
-    .select({ startAt: bookings.startAt, endAt: bookings.endAt })
+/** Confirmed bookings stored in our DB for a workspace, as intervals. */
+export async function confirmedBookingIntervals(
+  workspaceId: string,
+  from: Date,
+  to: Date,
+): Promise<Interval[]> {
+  const rows = await getDb()
+    .select({ start: bookings.startAt, end: bookings.endAt })
     .from(bookings)
     .where(
       and(
@@ -36,21 +38,7 @@ async function confirmedBookings(workspaceId: string, from: Date, to: Date) {
         gt(bookings.endAt, from),
       ),
     );
-}
-
-const overlaps = (a: { start: Date; end: Date }, b: { startAt: Date; endAt: Date }) =>
-  a.start < b.endAt && a.end > b.startAt;
-
-function withinBusinessHours(start: Date, end: Date, timeZone: string) {
-  const s = wallParts(start, timeZone);
-  const e = wallParts(new Date(end.getTime() - 1), timeZone);
-  return (
-    s.weekday >= 1 &&
-    s.weekday <= 5 &&
-    s.day === e.day &&
-    s.hour >= OPEN_HOUR &&
-    (e.hour < CLOSE_HOUR || (e.hour === CLOSE_HOUR && e.minute === 0))
-  );
+  return rows;
 }
 
 /**
@@ -61,33 +49,12 @@ export class MockCalendarAdapter implements CalendarAdapter {
   readonly name = "mock" as const;
 
   async getAvailability(q: AvailabilityQuery): Promise<Slot[]> {
-    const taken = await confirmedBookings(q.workspaceId, q.from, q.to);
-    const slots: Slot[] = [];
-    const durationMs = q.durationMin * 60_000;
-    // Walk day by day in the workspace's wall clock.
-    for (let dayOffset = 0; dayOffset < 30 && slots.length < q.limit; dayOffset++) {
-      const day = wallParts(new Date(q.from.getTime() + dayOffset * 86_400_000), q.timeZone);
-      if (day.weekday === 0 || day.weekday === 6) continue;
-      let perDay = 0;
-      for (let min = OPEN_HOUR * 60; min + q.durationMin <= CLOSE_HOUR * 60; min += STEP_MIN) {
-        const start = zonedToUtc(
-          day.year,
-          day.month,
-          day.day,
-          Math.floor(min / 60),
-          min % 60,
-          q.timeZone,
-        );
-        const end = new Date(start.getTime() + durationMs);
-        if (start < q.from || end > q.to) continue;
-        if (isFakeBusy(start, q.timeZone)) continue;
-        if (taken.some((b) => overlaps({ start, end }, b))) continue;
-        slots.push({ start: start.toISOString(), end: end.toISOString() });
-        // Offer a spread across days rather than one packed morning.
-        if (++perDay >= 3 || slots.length >= q.limit) break;
-      }
-    }
-    return slots;
+    const taken = await confirmedBookingIntervals(q.workspaceId, q.from, q.to);
+    return generateSlots({
+      ...q,
+      isBlocked: (slot) =>
+        isFakeBusy(slot.start, q.timeZone) || taken.some((b) => overlaps(slot, b)),
+    });
   }
 
   async isAvailable(q: {
@@ -95,11 +62,10 @@ export class MockCalendarAdapter implements CalendarAdapter {
     start: Date;
     end: Date;
     timeZone: string;
-    durationMin: number;
   }): Promise<boolean> {
     if (!withinBusinessHours(q.start, q.end, q.timeZone)) return false;
     if (isFakeBusy(q.start, q.timeZone)) return false;
-    const taken = await confirmedBookings(q.workspaceId, q.start, q.end);
+    const taken = await confirmedBookingIntervals(q.workspaceId, q.start, q.end);
     return taken.length === 0;
   }
 
@@ -109,4 +75,8 @@ export class MockCalendarAdapter implements CalendarAdapter {
   }
 
   async cancel() {}
+
+  async testConnection() {
+    return { ok: true as const, detail: "Built-in demo calendar (no external service)." };
+  }
 }

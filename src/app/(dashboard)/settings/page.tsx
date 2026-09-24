@@ -1,27 +1,26 @@
-import { CheckCircle2Icon, CircleDashedIcon, KeyRoundIcon } from "lucide-react";
+import { KeyRoundIcon } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/layout/page-header";
+import { IntegrationsCard } from "@/components/settings/integrations-card";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { env, isLlmConfigured } from "@/lib/env";
 import { formatUsd } from "@/lib/format";
-import { selectAdapters } from "@/server/adapters";
 import { getViewer } from "@/server/auth";
 import { getDb } from "@/server/db/client";
 import { getDemoBudget } from "@/server/services/demo-budget";
+import { getIntegrations } from "@/server/services/integrations";
 import { currentWorkspaceId, getWorkspace } from "@/server/workspace";
 
 export const metadata: Metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
-const KIND_LABEL = { calendar: "Calendar", crm: "CRM", email: "Email" } as const;
-
 export default async function SettingsPage() {
   const [viewer, ws] = await Promise.all([getViewer(), getWorkspace()]);
   if (!ws) notFound();
   const e = env();
-  const { status } = selectAdapters(e);
+  const integrations = await getIntegrations();
   const budget = await getDemoBudget(getDb(), {
     workspaceId: currentWorkspaceId(),
     runLimit: e.DEMO_DAILY_RUN_LIMIT,
@@ -53,29 +52,11 @@ export default async function SettingsPage() {
           }}
         />
         <aside className="space-y-4">
-          <Card size="sm">
-            <CardHeader>
-              <CardTitle>Integrations</CardTitle>
-              <CardDescription>
-                Selected from env vars; missing keys fall back to mocks.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <StatusRow label="LLM" value={model} ok={isLlmConfigured(e)} />
-              {status.map((s) => (
-                <div key={s.kind}>
-                  <StatusRow
-                    label={KIND_LABEL[s.kind]}
-                    value={`${s.active}${s.requested !== "auto" ? ` (requested: ${s.requested})` : ""}`}
-                    ok={!s.note}
-                  />
-                  {s.note ? (
-                    <p className="mt-1 pl-6 text-xs text-muted-foreground">{s.note}</p>
-                  ) : null}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <IntegrationsCard
+            integrations={integrations}
+            llm={{ label: model, ok: isLlmConfigured(e) }}
+            isAdmin={viewer.isAdmin}
+          />
           <Card size="sm">
             <CardHeader>
               <CardTitle>Public demo budget</CardTitle>
@@ -159,17 +140,6 @@ export default async function SettingsPage() {
         </aside>
       </div>
     </>
-  );
-}
-
-function StatusRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
-  const Icon = ok ? CheckCircle2Icon : CircleDashedIcon;
-  return (
-    <div className="flex items-center gap-2">
-      <Icon className={ok ? "size-4 text-emerald-500" : "size-4 text-amber-500"} />
-      <span className="w-16 shrink-0 text-muted-foreground">{label}</span>
-      <span className="truncate font-mono text-xs">{value}</span>
-    </div>
   );
 }
 

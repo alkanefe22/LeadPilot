@@ -2,6 +2,7 @@ import { z } from "zod";
 import { formatInTz } from "@/lib/time";
 import { isUniqueViolation } from "../../db/errors";
 import { bookings } from "../../db/schema";
+import { isDemoLead } from "../../services/intake";
 import { defineTool, ToolError, type ToolContext } from "../types";
 import { confirmedBooking, currentQualification, intFrom, updateLead } from "./helpers";
 
@@ -111,6 +112,7 @@ export const bookMeeting = defineTool({
       title,
       description: input.agenda ?? `Discovery call booked by LeadPilot for lead ${lead.id}.`,
       attendee: { email: lead.email!, name: lead.name },
+      inviteAttendee: !isDemoLead(lead),
     });
     try {
       const [row] = await ctx.db

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProviderError } from "../../adapters/http";
 import { sendLeadEmail } from "../../services/email";
 import { defineTool, ToolError, type ToolContext } from "../types";
 import { emailBody, emailSubject, updateLead } from "./helpers";
@@ -14,7 +15,11 @@ async function deliver(ctx: ToolContext, subject: string, body: string, kind: st
     body,
     kind,
   });
-  if (res.status === "failed") throw new ToolError(`Email provider error: ${res.error}`);
+  if (res.status === "failed") {
+    // Keep the structured provider error (status, hint) for the trace.
+    if (res.cause instanceof ProviderError) throw res.cause;
+    throw new ToolError(`Email provider error: ${res.error}`);
+  }
   if (res.status === "sent") ctx.state.outwardActions.push(kind);
   return res;
 }

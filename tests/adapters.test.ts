@@ -73,7 +73,6 @@ describe("adapters", () => {
           start: new Date(first.start),
           end: new Date(first.end),
           timeZone: TZ,
-          durationMin: 30,
         }),
       ).toBe(false);
     });
@@ -89,7 +88,6 @@ describe("adapters", () => {
             start,
             end,
             timeZone: TZ,
-            durationMin: 30,
           }),
         ).toBe(false);
       }

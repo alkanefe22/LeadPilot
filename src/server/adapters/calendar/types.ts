@@ -17,9 +17,13 @@ export type BookingRequest = {
   title: string;
   description: string;
   attendee: { email: string; name?: string | null };
+  /** False for demo (seeded/simulated) leads: never email invites to made-up addresses. */
+  inviteAttendee: boolean;
 };
 
 export type BookingResult = { eventId: string; meetingUrl: string | null };
+
+export type ConnectionCheck = { ok: true; detail: string };
 
 export interface CalendarAdapter {
   readonly name: "mock" | "google";
@@ -30,4 +34,6 @@ export interface CalendarAdapter {
   ): Promise<boolean>;
   book(req: BookingRequest): Promise<BookingResult>;
   cancel(eventId: string): Promise<void>;
+  /** Harmless read call; throws ProviderError on failure. */
+  testConnection(): Promise<ConnectionCheck>;
 }

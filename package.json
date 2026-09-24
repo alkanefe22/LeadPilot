@@ -19,7 +19,8 @@
     "db:studio": "drizzle-kit studio",
     "agent:run": "tsx --conditions=react-server scripts/run-agent.ts",
     "eval": "tsx --conditions=react-server evals/run.ts",
-    "db:local": "pglite-server --db=./.pglite --port=5433 --max-connections=32"
+    "db:local": "pglite-server --db=./.pglite --port=5433 --max-connections=32",
+    "google:auth": "tsx scripts/google-auth.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

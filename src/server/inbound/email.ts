@@ -41,6 +41,22 @@ function headerMap(headers: unknown): Record<string, string> {
   return out;
 }
 
+/** Resend may deliver HTML as a data: URI ("html_format": "data_uri"). */
+export function decodeDataUri(v: string | null): string | null {
+  if (!v?.startsWith("data:")) return v;
+  const comma = v.indexOf(",");
+  if (comma < 0) return null;
+  const meta = v.slice(5, comma);
+  const payload = v.slice(comma + 1);
+  try {
+    return meta.includes(";base64")
+      ? Buffer.from(payload, "base64").toString("utf8")
+      : decodeURIComponent(payload);
+  } catch {
+    return null;
+  }
+}
+
 const splitIds = (v: string | null | undefined) => (v ? (v.match(/<[^>]+>/g) ?? []) : []);
 
 /** Removes quoted history ("> …", "On … wrote:", Gmail/Outlook separators). */
@@ -99,7 +115,7 @@ export function normalizeInboundEmail(body: unknown): InboundEmail | null {
   const to = toRaw
     .map((t) => (typeof t === "string" ? parseAddress(t).email : isObj(t) ? str(t.email) : null))
     .filter((x): x is string => !!x);
-  const rawText = str(d.text) ?? stripHtml(str(d.html) ?? "");
+  const rawText = str(d.text) ?? stripHtml(decodeDataUri(str(d.html)) ?? "");
   if (!addr.email && !rawText) return null;
   return {
     provider,

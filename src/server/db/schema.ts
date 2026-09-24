@@ -328,6 +328,16 @@ export const rateLimits = pgTable(
   (t) => [primaryKey({ columns: [t.key, t.windowStart] })],
 );
 
+/** Last known health of each real integration, shown on the Settings page. */
+export const adapterHealth = pgTable("adapter_health", {
+  provider: text("provider").primaryKey(), // google | hubspot | resend
+  lastOkAt: timestamp("last_ok_at", { withTimezone: true }),
+  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  // true while the most recent call failed
+  failing: boolean("failing").notNull().default(false),
+});
+
 /* ---------------------------------------------------------------- types */
 
 export type Workspace = typeof workspaces.$inferSelect;
@@ -342,4 +352,5 @@ export type Email = typeof emails.$inferSelect;
 export type CrmContact = typeof crmContacts.$inferSelect;
 export type LeadStatus = (typeof leadStatus.enumValues)[number];
 export type LeadSource = (typeof leadSource.enumValues)[number];
+export type AdapterHealth = typeof adapterHealth.$inferSelect;
 export type RunTrigger = (typeof runTrigger.enumValues)[number];

@@ -91,11 +91,6 @@ export const envSchema = z.object({
   GOOGLE_REFRESH_TOKEN: optionalString,
   GOOGLE_CALENDAR_ID: optionalString,
 
-  // Airtable
-  AIRTABLE_API_KEY: optionalString,
-  AIRTABLE_BASE_ID: optionalString,
-  AIRTABLE_TABLE_NAME: optionalString,
-
   // HubSpot
   HUBSPOT_ACCESS_TOKEN: optionalString,
 
@@ -104,6 +99,10 @@ export const envSchema = z.object({
   EMAIL_FROM: optionalString,
   INBOUND_EMAIL_DOMAIN: optionalString,
   INBOUND_EMAIL_SECRET: optionalString,
+  // Svix signing secret of the Resend inbound webhook (whsec_…).
+  RESEND_WEBHOOK_SECRET: optionalString,
+  // Local port for `pnpm google:auth` (OAuth loopback redirect).
+  GOOGLE_OAUTH_PORT: int(53682, 1024, 65535),
 
   // Inbound webhook (seeded into the default workspace; editable in Settings)
   WEBHOOK_SECRET: optionalString,

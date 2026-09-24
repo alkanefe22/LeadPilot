@@ -17,24 +17,20 @@ describe("overview KPIs", () => {
     const now = Date.now();
     // A seeded lead "received" 3 hours ago, processed by the agent just now in 5s.
     const seeded = await createLead(db, { createdAt: new Date(now - 3 * 3_600_000) });
-    await db
-      .insert(agentRuns)
-      .values({
-        leadId: seeded.id,
-        trigger: "rerun",
-        model: "t",
-        status: "completed",
-        startedAt: new Date(now - 10_000),
-      });
-    await db
-      .insert(agentRuns)
-      .values({
-        leadId: seeded.id,
-        trigger: "rerun",
-        model: "t",
-        status: "completed",
-        startedAt: new Date(now - 2_000),
-      });
+    await db.insert(agentRuns).values({
+      leadId: seeded.id,
+      trigger: "rerun",
+      model: "t",
+      status: "completed",
+      startedAt: new Date(now - 10_000),
+    });
+    await db.insert(agentRuns).values({
+      leadId: seeded.id,
+      trigger: "rerun",
+      model: "t",
+      status: "completed",
+      startedAt: new Date(now - 2_000),
+    });
     await db
       .update(leads)
       .set({ firstResponseAt: new Date(now - 5_000) })
@@ -42,15 +38,13 @@ describe("overview KPIs", () => {
 
     // A live lead: received and answered 3s later (its run started at receipt).
     const live = await createLead(db, { createdAt: new Date(now - 60_000) });
-    await db
-      .insert(agentRuns)
-      .values({
-        leadId: live.id,
-        trigger: "inbound",
-        model: "t",
-        status: "completed",
-        startedAt: new Date(now - 60_000),
-      });
+    await db.insert(agentRuns).values({
+      leadId: live.id,
+      trigger: "inbound",
+      model: "t",
+      status: "completed",
+      startedAt: new Date(now - 60_000),
+    });
     await db
       .update(leads)
       .set({ firstResponseAt: new Date(now - 57_000) })

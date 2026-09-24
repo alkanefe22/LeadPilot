@@ -23,10 +23,12 @@ export const upsertCrmContact = defineTool({
       name: l.name,
       company: l.company,
       phone: l.phone,
+      website: l.website,
       source: l.source,
       status: input.status,
       score: l.score,
       note: input.note ?? null,
+      qualification: ctx.state.qualification ?? l.qualification,
     });
     return {
       crm: ctx.adapters.crm.name,

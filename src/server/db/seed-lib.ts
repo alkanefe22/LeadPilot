@@ -7,7 +7,7 @@ import { DEFAULT_ICP, DEFAULT_RULES, DEFAULT_WORKSPACE_ID, SEED_LEADS } from "./
 
 export async function resetDatabase(db: Database) {
   await db.execute(
-    sql`TRUNCATE TABLE agent_steps, agent_runs, approvals, bookings, emails, crm_contacts, messages, leads, rate_limits, workspaces RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE adapter_health, agent_steps, agent_runs, approvals, bookings, emails, crm_contacts, messages, leads, rate_limits, workspaces RESTART IDENTITY CASCADE`,
   );
 }
 

@@ -14,4 +14,8 @@ export class ConsoleEmailAdapter implements EmailAdapter {
     this.log(`[email:console] ${email.from} → ${email.to} · "${email.subject}"`);
     return { providerMessageId: newId("console", 12) };
   }
+
+  async testConnection() {
+    return { ok: true as const, detail: "Console outbox (emails are stored, not delivered)." };
+  }
 }

@@ -21,7 +21,7 @@ export type SendLeadEmailInput = {
 export type SendLeadEmailResult =
   | { status: "sent"; emailId: string; messageId: string; provider: string }
   | { status: "duplicate"; emailId: string }
-  | { status: "failed"; emailId: string; error: string };
+  | { status: "failed"; emailId: string; error: string; cause: unknown };
 
 const consoleAdapter = new ConsoleEmailAdapter();
 
@@ -105,6 +105,7 @@ export async function sendLeadEmail(input: SendLeadEmailInput): Promise<SendLead
       text: i.body,
       messageId,
       inReplyTo: lastInbound?.mid ?? null,
+      idempotencyKey: key,
     });
     const now = new Date();
     await i.db
@@ -134,6 +135,6 @@ export async function sendLeadEmail(input: SendLeadEmailInput): Promise<SendLead
       .update(emails)
       .set({ status: "failed", error, idempotencyKey: `${key}:failed:${reserved.id}` })
       .where(eq(emails.id, reserved.id));
-    return { status: "failed", emailId: reserved.id, error };
+    return { status: "failed", emailId: reserved.id, error, cause: err };
   }
 }

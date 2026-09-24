@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { ProviderError } from "../adapters/http";
 import { approvals } from "../db/schema";
 import { isFlagged } from "./tools/helpers";
 import { findTool } from "./tools";
@@ -71,6 +72,10 @@ export async function executeToolCall(
 
     return { status: "ok", input, output: await tool.run(input, ctx) };
   } catch (err) {
+    if (err instanceof ProviderError) {
+      // A real integration failed: tell the model exactly what happened. No mock fallback.
+      return { status: "error", input, output: err.toToolOutput() };
+    }
     if (err instanceof ToolError) {
       return { status: "error", input, output: { error: err.message, ...err.details } };
     }

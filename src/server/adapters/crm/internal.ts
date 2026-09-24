@@ -39,4 +39,8 @@ export class InternalCrmAdapter implements CrmAdapter {
       .returning({ id: crmContacts.id, created: sql<boolean>`(xmax = 0)` });
     return { id: row!.id, created: Boolean(row!.created) };
   }
+
+  async testConnection() {
+    return { ok: true as const, detail: "Built-in CRM (contacts stored in this app’s database)." };
+  }
 }

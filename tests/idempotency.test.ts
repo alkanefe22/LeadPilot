@@ -105,6 +105,7 @@ describe("idempotency", () => {
     const failing = {
       name: "console" as const,
       send: async () => Promise.reject(new Error("boom")),
+      testConnection: async () => ({ ok: true as const, detail: "" }),
     };
     const args = {
       db,
