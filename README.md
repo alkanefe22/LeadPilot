@@ -1,19 +1,21 @@
 # LeadPilot — AI Lead Qualification & Booking Agent
 
 **An autonomous agent that handles inbound leads end to end: it qualifies the lead against your
-Ideal Customer Profile with an LLM (Claude or Gemini), asks for missing details, books a meeting
+Ideal Customer Profile with an LLM (Claude, Gemini, any OpenAI-compatible API, or a local model via
+Ollama), asks for missing details, books a meeting
 when the lead fits, updates your CRM and sends the follow-up email — and shows every decision it
 made in a live, inspectable agent trace.**
 
 Leads come in from an embeddable web form, email replies, or any automation tool (n8n, Zapier, Make)
-via a signed webhook. Runs in **demo mode** with just a Postgres URL and an LLM key (a free Gemini
-key works); add Google Calendar, HubSpot and Resend keys to switch to the real integrations.
+via a signed webhook. Runs in **demo mode** with just a Postgres URL and a model — a local model via
+Ollama costs nothing; add Google Calendar, HubSpot and Resend keys to switch to the real integrations.
 
 ![Live agent trace](docs/media/hero-trace.gif)
 <!-- TODO(media): record docs/media/hero-trace.gif — see docs/media/README.md -->
 
 > Built with Next.js 16 (App Router) · TypeScript (strict) · Postgres + Drizzle · native tool use with
-> **Claude** (official Anthropic SDK) or **Gemini** (REST `generateContent`) · Zod · Tailwind + shadcn/ui · Vitest.
+> **Claude** (official Anthropic SDK), **Gemini** (REST `generateContent`) or any **OpenAI-compatible**
+> Chat Completions API incl. local **Ollama** · Zod · Tailwind + shadcn/ui · Vitest.
 
 ---
 
@@ -55,7 +57,7 @@ flowchart LR
   I -- "202 now, run in after()" --> L
 
   subgraph Agent["Agent loop (manual tool use)"]
-    L["Claude or Gemini<br/>LLM_PROVIDER"] <--> T["8 tools<br/>Zod-validated"]
+    L["Claude · Gemini · OpenAI-compatible / Ollama<br/>LLM_PROVIDER"] <--> T["8 tools<br/>Zod-validated"]
     T --> G{"Guardrails<br/>policy · approval gate<br/>step / cost / time caps"}
   end
 
@@ -89,31 +91,51 @@ every step can be measured, persisted and guarded:
 
 | Concern                      | What’s implemented                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Runaway loops & cost**     | `MAX_AGENT_STEPS`, per-call `LLM_MAX_TOKENS`, `MAX_COST_PER_RUN_USD` (the run stops before running more tools once exceeded), a wall-clock budget below the routes’ `maxDuration = 60`, and a sweeper that fails runs stuck in `running` for more than 2 minutes. `refusal` / `max_tokens` stop reasons end the run cleanly.                                                                                                                                                                                                                                                                                                                        |
+| **Runaway loops & cost**     | `MAX_AGENT_STEPS`, per-call `LLM_MAX_TOKENS`, `MAX_COST_PER_RUN_USD` (the run stops before running more tools once exceeded), a wall-clock budget below the routes’ `maxDuration = 60`, and a sweeper that fails runs still `running` a minute past their own time budget (each run stores it; local models get a longer one). `refusal` / `max_tokens` stop reasons end the run cleanly.                                                                                                                                                                                                                                                           |
 | **Prompt injection**         | Lead text is fenced and the fence can’t be closed from inside. A heuristic scanner flags text aimed at the agent (“ignore previous instructions”, “mark me qualified”, fake system markup…). Flagged leads show a **⚠ Flagged** badge with the matched patterns, are scored **below the threshold** (so they can’t be auto-booked) and every outward action they trigger **waits for approval**. The scanner can misfire, so an admin can **Clear flag & re-run**. Tests include a fully “hijacked” model to show the damage stays contained, plus benign look-alikes (“please ignore my previous email”, “NPS score 98”) that must not be flagged. |
 | **Human in the loop**        | “Require approval” holds bookings and emails in a queue: approve, edit the payload (re-validated against the tool schema) or reject. Each decision becomes a _human_ step in the trace, followed by the executed action.                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | **Idempotency**              | One confirmed booking per lead and one running run per lead (partial unique indexes). Email idempotency keys are reserved before sending (and passed to Resend). Webhook retries dedupe on `external_id` (or the raw-body hash); inbound emails dedupe on `Message-ID`.                                                                                                                                                                                                                                                                                                                                                                             |
 | **Integrations fail loudly** | Provider calls retry once on 429/5xx with backoff; after that the tool returns a clear error that is recorded in the trace, and Settings shows a red badge with the last error. There is **no silent runtime fallback** to mocks.                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| **Demo safety**              | Seeded and simulated leads never reach a real provider (no emails, no calendar invites). `PUBLIC_DEMO_FORCE_MOCK=true` forces the built-in adapters on a public deployment. A global daily run/cost budget and per-IP rate limits protect the public “Simulate lead” button.                                                                                                                                                                                                                                                                                                                                                                        |
+| **Demo safety**              | Seeded and simulated leads never reach a real provider (no emails, no calendar invites). `PUBLIC_DEMO_FORCE_MOCK=true` forces the built-in adapters on a public deployment. On a public demo, visitors’ “Simulate lead” **replays a recorded real run** by default (no model calls, $0); in live mode a global daily run/cost budget and per-IP rate limits protect it.                                                                                                                                                                                                                                                                             |
 | **App security**             | Signed admin session (HS256 cookie), read-only public demo with PII masking, DB-backed rate limits on every public write endpoint (form, webhook, email, simulate, login), HMAC/Svix-verified webhooks, input sanitization, `X-Frame-Options` / `frame-ancestors` (only the form is embeddable), and production **refuses to start** with a missing/weak/default `ADMIN_PASSWORD`, a short `SESSION_SECRET` or the dev fake LLM enabled.                                                                                                                                                                                                            |
 
-## Model-agnostic: Claude or Gemini
+## Model-agnostic: Claude, Gemini, OpenAI-compatible APIs, or a local model via Ollama
 
 The agent talks to the model through one small `LlmClient` interface, so the loop, tools, guardrails,
-trace and eval are identical for both providers. Switch with env vars — no code changes:
+trace and eval are identical for every provider. Switch with env vars — no code changes:
 
-| Provider             | Env                                                 | Notes                            |
-| -------------------- | --------------------------------------------------- | -------------------------------- |
-| **Anthropic Claude** | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`              | Official SDK, prompt caching on. |
-| **Google Gemini**    | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_TIER=free | paid`                            | REST `generateContent` with function calling; thought signatures are replayed verbatim (required by Gemini 3). |
+| Provider                                                               | Env                                                                                                                                | Notes                                                                                                                                                                                     |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Anthropic Claude**                                                   | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`                                                                                             | Official SDK, prompt caching on.                                                                                                                                                          |
+| **Google Gemini**                                                      | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_TIER=free\|paid`                                                                         | REST `generateContent` with function calling; thought signatures are replayed verbatim (required by Gemini 3).                                                                            |
+| **OpenAI-compatible** (Ollama, LM Studio, OpenAI, Groq, OpenRouter, …) | `OPENAI_COMPAT_MODEL`, `OPENAI_COMPAT_BASE_URL` (default `http://localhost:11434/v1` = Ollama), `OPENAI_COMPAT_API_KEY` (optional) | Chat Completions with `tools`. On a localhost base URL the run is labelled **local** and costs $0; arguments that aren’t valid JSON go back to the model as a tool error so it can retry. |
 
-`LLM_PROVIDER=anthropic|gemini` picks explicitly; if unset, Claude is used when its key and model are
-set, otherwise Gemini. Settings shows the active provider and model.
+`LLM_PROVIDER=anthropic|gemini|openai-compatible` picks explicitly; if unset, the first configured of
+Claude, Gemini and OpenAI-compatible is used. Settings shows the active provider and model.
+
+### Local model via Ollama ($0)
+
+For development and evals without spending anything:
+
+1. Install [Ollama](https://ollama.com/download) and pull a model tagged **tools** on ollama.com, e.g.
+   `ollama pull qwen3.5:9b` (fits a 16 GB GPU).
+2. Raise Ollama’s context window — it defaults to 4k on GPUs under 24 GB, too small for the agent’s
+   prompt plus tool results: set `OLLAMA_CONTEXT_LENGTH=16384` and restart Ollama (the OpenAI-compatible
+   API has no per-request context setting).
+3. In `.env.local`: `LLM_PROVIDER=openai-compatible` and `OPENAI_COMPAT_MODEL=qwen3.5:9b`. Optionally
+   `OPENAI_COMPAT_REASONING_EFFORT` to control thinking (names are model-defined).
+
+Local models are slower and weaker than hosted frontier models: runs on a localhost base URL get
+`LOCAL_RUN_TIME_BUDGET_MS` (default 5 min) instead of the 50 s serverless budget, and schema
+violations are returned to the model to correct. Judge a local model by its own eval — never by numbers
+measured with another model.
 
 **Cost labels.** Every step records tokens and an estimated cost from a price table
-(`src/server/llm/pricing.ts`, overridable via `ANTHROPIC_PRICE_*` / `GEMINI_PRICE_*`). On the Gemini
-**free tier** nothing is billed, so the trace and KPIs show the figure as _“est. cost at paid rates”_ and
-note that $0 was billed.
+(`src/server/llm/pricing.ts`, overridable via `ANTHROPIC_PRICE_*` / `GEMINI_PRICE_*` /
+`OPENAI_COMPAT_PRICE_*`). On the Gemini **free tier** nothing is billed, so the trace and KPIs show the
+figure as _“est. cost at paid rates”_ and note that $0 was billed. Local models are exactly $0. For a
+hosted OpenAI-compatible model that isn’t in the table, set `OPENAI_COMPAT_PRICE_*` — unknown models are
+priced conservatively at the top tier, which can trip `MAX_COST_PER_RUN_USD`.
 
 **Rate limits.** Free-tier limits are per project and shown in Google AI Studio (they change, so no
 numbers are hard-coded here). A 429 is retried with backoff (honoring Google’s `retryDelay`); if it
@@ -135,6 +157,24 @@ honest answer.
 > ⚠️ **Data use on the free tier.** Google’s pricing page states that content sent on the Gemini API
 > **free tier is used to improve Google’s products**, while paid-tier content is not. Use the free tier
 > for demos with made-up data only; for real client leads use a paid tier (or Claude).
+
+## Public demo: replays of real runs ($0)
+
+With `PUBLIC_DEMO=true`, anonymous visitors don’t trigger model calls. `DEMO_MODE` (default `replay`
+on a public demo) makes their **Simulate lead** button open a **recorded real run** and play it back
+step by step with its original relative timing (each wait capped at 3 s), under a badge
+_“Replay of a real run · model &lt;name&gt; · &lt;date&gt;”_. No lead is created and nothing is billed.
+The admin still runs the agent live. `DEMO_MODE=live` restores live runs for visitors (with the
+daily budget and rate limits).
+
+Record the runs locally — a local model works — and commit the file:
+
+```bash
+pnpm demo:record 1 5 16          # fresh copies of seed leads 1, 5, 16 → demo/recordings.json
+```
+
+Only finished runs of a **real** model are saved: runs of the development fake LLM are refused when
+recording and dropped when loading, and failed runs are skipped.
 
 ## Adapters
 
@@ -161,17 +201,22 @@ webhook contract (headers, payload, responses) is in [`examples/README.md`](exam
 
 ## Eval results
 
-`pnpm eval` runs the real agent (Claude or Gemini) on a labeled set of 30 leads ([`evals/dataset.ts`](evals/dataset.ts)):
+`pnpm eval` runs the real agent (whichever provider is configured — a local Ollama model works) on a labeled set of 30 leads ([`evals/dataset.ts`](evals/dataset.ts)):
 the 18 demo leads plus 12 extra cases — good fits, missing-info leads, poor fits, spam and vendor pitches,
 seven languages, **two prompt-injection attempts** and **three benign look-alikes**. It reports accuracy, a
 confusion matrix, safety checks (injections blocked, look-alikes not flagged), and average cost and
 latency per lead. The run uses an isolated in-memory database and the built-in adapters.
 
+Results are always labelled with the **exact provider and model** that produced them, per case. Every
+finished case is saved to `evals/results/partial.json`; a rate-limit/quota or other provider error
+stops the run cleanly (the interrupted case isn’t scored) and `pnpm eval --resume` continues later.
+The README block below and `evals/results/latest.*` are only written once all 30 cases are done.
+
 <!-- EVAL:START -->
 
-> **TODO:** no measured results yet. Run `pnpm eval` with a real model (`GEMINI_API_KEY` /
-> `GEMINI_MODEL` or `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`) — it replaces this block with the
-> measured numbers (model name included) and writes
+> **TODO:** no measured results yet. Run `pnpm eval` with a real model (a local Ollama model,
+> Gemini or Claude) — it replaces this block with the measured numbers (provider and model included)
+> and writes
 > [`evals/results/latest.md`](evals/results/latest.md). Numbers here are never written by hand.
 
 <!-- EVAL:END -->
@@ -191,7 +236,7 @@ The agent’s behaviour comes from the ICP and rules text in Settings, so the sa
 
 ```bash
 pnpm install
-cp .env.example .env.local        # DATABASE_URL + an LLM: GEMINI_API_KEY/GEMINI_MODEL (free) or ANTHROPIC_*
+cp .env.example .env.local        # DATABASE_URL + an LLM: OPENAI_COMPAT_MODEL (local Ollama), GEMINI_* or ANTHROPIC_*
 pnpm db:local                     # optional: Postgres-compatible local DB via PGlite on :5433 (separate terminal)
 pnpm db:migrate && pnpm db:seed
 pnpm dev                          # http://localhost:3000
@@ -202,16 +247,17 @@ rule-based stand-in — its runs are labeled `dev-fake-llm` and say nothing abou
 
 ## Scripts
 
-| Script                                              | What it does                                                                                                                          |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm dev`                                          | Next.js dev server                                                                                                                    |
-| `pnpm db:local`                                     | Local Postgres-compatible server (PGlite) persisted in `./.pglite`                                                                    |
-| `pnpm db:migrate` / `db:seed` / `db:reset`          | Apply migrations / insert 18 demo leads / wipe + reseed                                                                               |
-| `pnpm agent:run <leadId>` · `--seed <n>` · `--list` | Run the agent on one lead and print a live step-by-step trace in the terminal                                                         |
-| `pnpm eval`                                         | Labeled eval: accuracy, confusion matrix, safety checks, cost & latency (`--dry` tests the pipeline without a key and writes nothing) |
-| `pnpm google:auth`                                  | One-time Google OAuth flow that prints `GOOGLE_REFRESH_TOKEN`                                                                         |
-| `pnpm test`                                         | Vitest: unit + integration tests on in-memory Postgres, fake-LLM agent-loop tests, adapter contract tests with mocked `fetch`         |
-| `pnpm typecheck` / `lint` / `format`                | Quality gates                                                                                                                         |
+| Script                                              | What it does                                                                                                                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm dev`                                          | Next.js dev server                                                                                                                                                 |
+| `pnpm db:local`                                     | Local Postgres-compatible server (PGlite) persisted in `./.pglite`                                                                                                 |
+| `pnpm db:migrate` / `db:seed` / `db:reset`          | Apply migrations / insert 18 demo leads / wipe + reseed                                                                                                            |
+| `pnpm agent:run <leadId>` · `--seed <n>` · `--list` | Run the agent on one lead and print a live step-by-step trace in the terminal                                                                                      |
+| `pnpm eval` · `--resume` · `--fresh`                | Labeled eval: accuracy, confusion matrix, safety checks, cost & latency; resumable after quota stops (`--dry` tests the pipeline without a key and writes nothing) |
+| `pnpm demo:record <seed...>`                        | Record real runs for the public demo’s replay mode (`demo/recordings.json`)                                                                                        |
+| `pnpm google:auth`                                  | One-time Google OAuth flow that prints `GOOGLE_REFRESH_TOKEN`                                                                                                      |
+| `pnpm test`                                         | Vitest: unit + integration tests on in-memory Postgres, fake-LLM agent-loop tests, adapter contract tests with mocked `fetch`                                      |
+| `pnpm typecheck` / `lint` / `format`                | Quality gates                                                                                                                                                      |
 
 ## Deploying to Vercel
 
@@ -223,11 +269,11 @@ rule-based stand-in — its runs are labeled `dev-fake-llm` and say nothing abou
    https://vercel.com/new/clone?repository-url=<REPO_URL>&env=DATABASE_URL,ANTHROPIC_API_KEY,ANTHROPIC_MODEL,ADMIN_PASSWORD,SESSION_SECRET,APP_URL -->
 4. Set env vars (every variable is documented in `.env.example`). **Required in production:**
    `DATABASE_URL`, `ADMIN_PASSWORD` (≥ 12 chars, not the dev default), `SESSION_SECRET` (≥ 32 chars),
-   `APP_URL`, and for the agent either `GEMINI_API_KEY` + `GEMINI_MODEL` or `ANTHROPIC_API_KEY` +
-   `ANTHROPIC_MODEL`. (A public demo on the Gemini free tier is fine because it only processes
-   made-up simulated leads.) For a **public demo** also set
-   `PUBLIC_DEMO=true`, `PUBLIC_DEMO_FORCE_MOCK=true`, `DEMO_DAILY_RUN_LIMIT`, `DEMO_DAILY_COST_LIMIT_USD`
-   and `DEMO_VIDEO_URL`.
+   `APP_URL`. A **public demo** needs no model key at all: set `PUBLIC_DEMO=true`,
+   `PUBLIC_DEMO_FORCE_MOCK=true` and `DEMO_VIDEO_URL`, and commit `demo/recordings.json` from
+   `pnpm demo:record` — visitors watch replays of real runs ($0). For live runs on the deployment
+   (the admin’s, or `DEMO_MODE=live`) add a hosted provider — a local Ollama model isn’t reachable
+   from Vercel — plus `DEMO_DAILY_RUN_LIMIT` / `DEMO_DAILY_COST_LIMIT_USD`.
 5. Deploy, then check Settings → Integrations, simulate a lead, and send a signed webhook.
 
 If a required variable is missing or weak, the function logs `[leadpilot] Refusing to start.` with the reason.
@@ -245,6 +291,7 @@ src/
   server/services/     intake, email, approvals, stats, trace, demo budget, simulator
   server/db/           Drizzle schema, migrations, seed
 evals/                 dataset + runner (results in evals/results/)
+demo/                  recorded real runs for the public demo’s replay mode
 examples/              curl + n8n examples, webhook contract
 tests/                 Vitest suites
 ```
@@ -257,6 +304,9 @@ tests/                 Vitest suites
 - The eval set is small (30 cases) and hand-labeled for the default ICP: a regression check, not a benchmark.
 - Cost figures are estimates from token usage and a static price table (`src/server/llm/pricing.ts`);
   on the Gemini free tier they are estimates at paid rates, not charges.
+- Small local models (7–14B) call tools less reliably than hosted frontier models; the loop returns
+  invalid arguments to the model, but expect more retries, slower runs and lower eval accuracy.
+- Public-demo replays show recorded runs, not the visitor’s own input.
 
 ## License
 
