@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  json,
   jsonb,
   numeric,
   pgEnum,
@@ -125,6 +126,10 @@ export const leads = pgTable(
     // Heuristic flags from the inbound scanner (e.g. "prompt_injection"). Flagged leads
     // can never trigger outward actions without a human approval.
     riskFlags: jsonb("risk_flags").$type<string[]>().notNull().default([]),
+    // Scanner pattern ids that matched (shown in the UI next to the flag).
+    riskMatches: jsonb("risk_matches").$type<string[]>().notNull().default([]),
+    // Set when an admin clears a flag; only content received after this is re-scanned.
+    riskReviewedAt: timestamp("risk_reviewed_at", { withTimezone: true }),
     threadToken: text("thread_token")
       .notNull()
       .unique()
@@ -204,8 +209,9 @@ export const agentSteps = pgTable(
     type: stepType("type").notNull(),
     toolName: text("tool_name"),
     toolUseId: text("tool_use_id"),
-    input: jsonb("input"),
-    output: jsonb("output"),
+    // json (not jsonb) keeps key order exactly as the model/tool produced it — readable traces.
+    input: json("input"),
+    output: json("output"),
     text: text("text"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),

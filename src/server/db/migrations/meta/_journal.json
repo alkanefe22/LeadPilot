@@ -15,6 +15,20 @@
       "when": 1790260672075,
       "tag": "0001_lead_risk_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790261582525,
+      "tag": "0002_lead_risk_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790262253400,
+      "tag": "0003_trace_json_order",
+      "breakpoints": true
     }
   ]
 }

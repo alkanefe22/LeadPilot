@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { env } from "@/lib/env";
 import { newId } from "@/lib/ids";
+import { ConsoleEmailAdapter } from "../adapters/email/console";
 import type { EmailAdapter } from "../adapters/email/types";
 import type { Database } from "../db/client";
+import { isDemoLead } from "./intake";
 import { emails, leads, messages, type Lead, type Workspace } from "../db/schema";
 
 export type SendLeadEmailInput = {
@@ -20,6 +22,8 @@ export type SendLeadEmailResult =
   | { status: "sent"; emailId: string; messageId: string; provider: string }
   | { status: "duplicate"; emailId: string }
   | { status: "failed"; emailId: string; error: string };
+
+const consoleAdapter = new ConsoleEmailAdapter();
 
 export function emailIdempotencyKey(leadId: string, subject: string, body: string) {
   const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
@@ -44,7 +48,13 @@ export function replyToAddress(lead: Lead) {
  * *before* the provider call, so a retried run (or a double-approved action) can never
  * send the same message twice.
  */
-export async function sendLeadEmail(i: SendLeadEmailInput): Promise<SendLeadEmailResult> {
+export async function sendLeadEmail(input: SendLeadEmailInput): Promise<SendLeadEmailResult> {
+  // Demo leads (seeded / simulated) use made-up addresses: never hand them to a real
+  // provider, even when Resend is configured. They always go to the console outbox.
+  const i =
+    isDemoLead(input.lead) && input.adapter.name !== "console"
+      ? { ...input, adapter: consoleAdapter }
+      : input;
   if (!i.lead.email) throw new Error("Lead has no email address");
   const key = emailIdempotencyKey(i.lead.id, i.subject, i.body);
   const domain = env().INBOUND_EMAIL_DOMAIN ?? "leadpilot.local";

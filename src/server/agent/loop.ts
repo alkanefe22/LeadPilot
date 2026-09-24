@@ -123,15 +123,22 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
     confirmedBooking(db, lead.id),
   ]);
 
-  // Inbound scan: flag leads whose text addresses the agent. Sticky once set.
+  // Inbound scan: flag leads whose text addresses the agent. Sticky once set; after an
+  // admin clears a flag, only content that arrived later is scanned again.
+  const reviewedAt = lead.riskReviewedAt;
   const scan = detectPromptInjection(
-    lead.message,
-    ...thread.filter((m) => m.direction === "inbound").map((m) => m.body),
+    ...(reviewedAt ? [] : [lead.message]),
+    ...thread
+      .filter((m) => m.direction === "inbound" && (!reviewedAt || m.createdAt > reviewedAt))
+      .map((m) => m.body),
   );
   if (scan.suspicious && !lead.riskFlags.includes(RISK_PROMPT_INJECTION)) {
     [lead] = await db
       .update(leads)
-      .set({ riskFlags: [...lead.riskFlags, RISK_PROMPT_INJECTION] })
+      .set({
+        riskFlags: [...lead.riskFlags, RISK_PROMPT_INJECTION],
+        riskMatches: scan.matches,
+      })
       .where(eq(leads.id, lead.id))
       .returning();
   }

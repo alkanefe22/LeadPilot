@@ -184,7 +184,7 @@ describe("agent loop (mocked LLM)", () => {
   });
 
   describe("prompt injection", () => {
-    const injection = SEED_LEADS.at(-1)!;
+    const injection = SEED_LEADS.find((l) => l.kind === "adversarial")!;
 
     it("contains the damage even when the model complies with the injected instructions", async () => {
       const lead = await createLead(db, {

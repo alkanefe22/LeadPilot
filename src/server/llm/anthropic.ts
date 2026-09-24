@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env, isLlmConfigured } from "@/lib/env";
+import { DevFakeLlm } from "./fake";
 import { LlmNotConfiguredError, type LlmClient, type LlmRequest, type LlmResponse } from "./types";
 
 export class AnthropicLlm implements LlmClient {
@@ -40,6 +41,10 @@ export class AnthropicLlm implements LlmClient {
 
 export function getLlm(): LlmClient {
   const e = env();
+  if (e.DEV_FAKE_LLM) {
+    if (e.NODE_ENV === "production") throw new Error("DEV_FAKE_LLM cannot be used in production.");
+    return new DevFakeLlm();
+  }
   if (!isLlmConfigured(e)) throw new LlmNotConfiguredError();
   return new AnthropicLlm(e.ANTHROPIC_MODEL!, e.ANTHROPIC_API_KEY!, e.ANTHROPIC_EFFORT);
 }

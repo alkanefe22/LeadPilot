@@ -1,10 +1,13 @@
 import "server-only";
 import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "../db/client";
+import { maskEmail, maskText } from "../security/redact";
 import { leadSource, leadStatus, leads, type LeadSource, type LeadStatus } from "../db/schema";
 
 export type LeadFilters = {
   workspaceId: string;
+  /** Mask contact details (public demo viewers). */
+  redact?: boolean;
   q?: string;
   status?: string;
   source?: string;
@@ -29,7 +32,8 @@ export async function listLeads(f: LeadFilters) {
     where.push(
       or(
         ilike(leads.name, pattern),
-        ilike(leads.email, pattern),
+        // Public viewers can't search by (masked) email — no address enumeration.
+        ...(f.redact ? [] : [ilike(leads.email, pattern)]),
         ilike(leads.company, pattern),
         ilike(leads.message, pattern),
       )!,
@@ -48,6 +52,8 @@ export async function listLeads(f: LeadFilters) {
         score: leads.score,
         language: leads.language,
         message: leads.message,
+        riskFlags: leads.riskFlags,
+        riskMatches: leads.riskMatches,
         createdAt: leads.createdAt,
       })
       .from(leads)
@@ -57,7 +63,12 @@ export async function listLeads(f: LeadFilters) {
       .offset(f.offset ?? 0),
     db.select({ value: count() }).from(leads).where(condition),
   ]);
-  return { rows, total: total?.value ?? 0 };
+  return {
+    rows: f.redact
+      ? rows.map((r) => ({ ...r, email: maskEmail(r.email), message: maskText(r.message) }))
+      : rows,
+    total: total?.value ?? 0,
+  };
 }
 
 export type LeadListRow = Awaited<ReturnType<typeof listLeads>>["rows"][number];

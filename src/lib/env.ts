@@ -49,6 +49,9 @@ export const envSchema = z.object({
   ANTHROPIC_PRICE_INPUT_PER_MTOK: float,
   ANTHROPIC_PRICE_OUTPUT_PER_MTOK: float,
   MAX_AGENT_STEPS: int(12, 1, 50),
+  // Development only: rule-based stand-in for Claude so the UI can be exercised
+  // without an API key. Refused when NODE_ENV=production.
+  DEV_FAKE_LLM: bool(false),
   // Optional `output_config.effort` (low | medium | high | xhigh | max). Only sent when set,
   // because not every model accepts it.
   ANTHROPIC_EFFORT: z.preprocess(
@@ -68,6 +71,15 @@ export const envSchema = z.object({
   ADMIN_PASSWORD: optionalString,
   SESSION_SECRET: optionalString,
   PUBLIC_DEMO: bool(true),
+  // Global daily budget for simulated (public demo) runs, UTC day.
+  DEMO_DAILY_RUN_LIMIT: int(50, 0, 100_000),
+  DEMO_DAILY_COST_LIMIT_USD: z.preprocess(
+    (v) => (v === undefined || v === "" ? 2 : v),
+    z.coerce.number().nonnegative(),
+  ) as z.ZodType<number>,
+  DEMO_VIDEO_URL: z.preprocess((v) => (v === "" ? undefined : v), z.url().optional()) as z.ZodType<
+    string | undefined
+  >,
 
   // Adapter selection ("auto" = real adapter when its keys exist, otherwise mock)
   CALENDAR_ADAPTER: z.enum(["auto", "mock", "google"]).default("auto"),
@@ -124,5 +136,8 @@ export function resetEnvCache() {
 }
 
 export function isLlmConfigured(e: Env = env()) {
-  return Boolean(e.ANTHROPIC_API_KEY && e.ANTHROPIC_MODEL);
+  return (
+    (e.DEV_FAKE_LLM && e.NODE_ENV !== "production") ||
+    Boolean(e.ANTHROPIC_API_KEY && e.ANTHROPIC_MODEL)
+  );
 }

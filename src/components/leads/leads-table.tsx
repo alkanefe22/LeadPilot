@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { LeadListRow } from "@/server/services/leads";
+import { isInjectionFlagged, RiskFlagBadge } from "./risk-flag";
 import { SourceLabel } from "./source-icon";
 import { ScorePill, StatusBadge } from "./status-badge";
 
@@ -49,7 +50,12 @@ export function LeadsTable({ rows }: { rows: LeadListRow[] }) {
                 </Link>
               </TableCell>
               <TableCell>
-                <StatusBadge status={l.status} />
+                <div className="flex flex-wrap items-center gap-1">
+                  <StatusBadge status={l.status} />
+                  {isInjectionFlagged(l.riskFlags) ? (
+                    <RiskFlagBadge matches={l.riskMatches} />
+                  ) : null}
+                </div>
               </TableCell>
               <TableCell className="hidden sm:table-cell">
                 <ScorePill score={l.score} />

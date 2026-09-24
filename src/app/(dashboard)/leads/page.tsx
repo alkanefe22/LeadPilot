@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { LeadFilters } from "@/components/leads/lead-filters";
 import { LeadsTable } from "@/components/leads/leads-table";
+import { getViewer } from "@/server/auth";
 import { leadStatusCounts, listLeads } from "@/server/services/leads";
 import { currentWorkspaceId } from "@/server/workspace";
 
@@ -13,9 +14,11 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
 export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const sp = await searchParams;
   const workspaceId = currentWorkspaceId();
+  const viewer = await getViewer();
   const [{ rows, total }, counts] = await Promise.all([
     listLeads({
       workspaceId,
+      redact: !viewer.isAdmin,
       q: first(sp.q),
       status: first(sp.status),
       source: first(sp.source),
