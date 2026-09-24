@@ -183,6 +183,8 @@ export const agentRuns = pgTable(
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     costUsd: usd("cost_usd"),
+    // "free" when the provider billed $0 (Gemini free tier): cost_usd is then an estimate at paid rates.
+    billingTier: text("billing_tier"),
     latencyMs: integer("latency_ms").notNull().default(0),
     summary: text("summary"),
     error: text("error"),

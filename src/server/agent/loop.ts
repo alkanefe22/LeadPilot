@@ -100,11 +100,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
   const limits = { ...defaultLimits(), ...opts.limits };
   const llm = opts.llm ?? getLlm();
   const adapters = opts.adapters ?? getAdapters();
-  const e = env();
-  const price = priceFor(llm.model, {
-    input: e.ANTHROPIC_PRICE_INPUT_PER_MTOK,
-    output: e.ANTHROPIC_PRICE_OUTPUT_PER_MTOK,
-  });
+  const price = priceFor(llm.model, llm.priceOverride);
 
   await sweepStaleRuns(db);
 
@@ -147,7 +143,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
   try {
     const [run] = await db
       .insert(agentRuns)
-      .values({ leadId: lead!.id, trigger: opts.trigger, model: llm.model, startedAt: now() })
+      .values({
+        leadId: lead!.id,
+        trigger: opts.trigger,
+        model: llm.model,
+        billingTier: llm.billingTier ?? null,
+        startedAt: now(),
+      })
       .returning({ id: agentRuns.id });
     runId = run!.id;
   } catch (err) {

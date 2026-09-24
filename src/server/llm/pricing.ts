@@ -15,6 +15,19 @@ const PRICES: [prefix: string, input: number, output: number][] = [
   ["claude-sonnet-4", 3, 15],
   ["claude-haiku-4-5", 1, 5],
   ["claude-3-5-haiku", 0.8, 4],
+  // Gemini paid-tier text rates (ai.google.dev/gemini-api/docs/pricing, Sep 2026; ≤200k-token
+  // prompts; output includes thinking tokens). 3.6–3.8 Flash rates rise on 2027-01-01 — use
+  // GEMINI_PRICE_*_PER_MTOK to override. The free tier bills $0; these are estimates.
+  ["gemini-3.8-flash", 0.75, 3.75],
+  ["gemini-3.7-flash", 0.75, 3.75],
+  ["gemini-3.6-flash", 0.75, 3.75],
+  ["gemini-3.5-flash-lite", 0.3, 2.5],
+  ["gemini-3.5-flash", 1.5, 9],
+  ["gemini-3.1-flash-lite", 0.25, 1.5],
+  ["gemini-3.1-pro", 2, 12],
+  ["gemini-2.5-pro", 1.25, 10],
+  ["gemini-2.5-flash-lite", 0.1, 0.4],
+  ["gemini-2.5-flash", 0.3, 2.5],
 ];
 
 // Unknown models are priced like the Opus tier so the per-run cost cap stays conservative.

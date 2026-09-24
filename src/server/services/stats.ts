@@ -17,6 +17,8 @@ export type OverviewStats = {
   avgCostPerLead: number | null;
   totalCost: number;
   totalRuns: number;
+  /** Runs billed $0 by the provider (Gemini free tier): their cost is an estimate at paid rates. */
+  freeTierRuns: number;
   avgRunLatencyMs: number | null;
   statusCounts: Record<LeadStatus, number>;
   daily: DailyPoint[];
@@ -78,6 +80,7 @@ export async function getOverviewStats(
           runs: sql<number>`count(*)::int`,
           cost: sql<number>`coalesce(sum(${agentRuns.costUsd}), 0)::float`,
           leadsWithRuns: sql<number>`count(distinct ${agentRuns.leadId})::int`,
+          freeTierRuns: sql<number>`count(*) filter (where ${agentRuns.billingTier} = 'free')::int`,
           avgLatency: sql<
             number | null
           >`avg(${agentRuns.latencyMs}) filter (where ${agentRuns.status} <> 'running')::float`,
@@ -144,6 +147,7 @@ export async function getOverviewStats(
     avgCostPerLead: ra.leadsWithRuns ? Number(ra.cost) / ra.leadsWithRuns : null,
     totalCost: Number(ra.cost),
     totalRuns: ra.runs,
+    freeTierRuns: ra.freeTierRuns,
     avgRunLatencyMs: ra.avgLatency === null ? null : Number(ra.avgLatency),
     statusCounts,
     daily,

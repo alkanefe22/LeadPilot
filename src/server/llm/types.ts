@@ -14,13 +14,17 @@ export type LlmResponse = Pick<Anthropic.Message, "content" | "stop_reason" | "u
 
 export interface LlmClient {
   readonly model: string;
+  /** "free" → provider bills $0 (e.g. Gemini free tier); costs are estimates at paid rates. */
+  readonly billingTier?: "free" | "paid";
+  /** Per-provider price override (USD per 1M tokens) from env. */
+  readonly priceOverride?: { input?: number; output?: number };
   create(req: LlmRequest): Promise<LlmResponse>;
 }
 
 export class LlmNotConfiguredError extends Error {
   constructor() {
     super(
-      "Claude is not configured. Set ANTHROPIC_API_KEY and ANTHROPIC_MODEL in .env.local to run the agent.",
+      "No LLM configured. Set GEMINI_API_KEY + GEMINI_MODEL (free tier) or ANTHROPIC_API_KEY + ANTHROPIC_MODEL in .env.local.",
     );
     this.name = "LlmNotConfiguredError";
   }

@@ -32,12 +32,15 @@ export function StepItem({
   maxLatency,
   isLast,
   approvals,
+  freeTier = false,
 }: {
   step: TraceStep;
   model: string;
   maxLatency: number;
   isLast: boolean;
   approvals: Record<string, ApprovalState>;
+  /** Free-tier run: costs are estimates at paid rates, $0 billed. */
+  freeTier?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const tone =
@@ -102,7 +105,12 @@ export function StepItem({
                 <>
                   <Metric label="Input tokens" value={`${formatTokens(step.inputTokens)} in`} />
                   <Metric label="Output tokens" value={`${formatTokens(step.outputTokens)} out`} />
-                  <Metric label="Cost" value={formatUsd(step.costUsd, { precise: true })} />
+                  <Metric
+                    label={
+                      freeTier ? "Estimated cost at paid rates (free tier, $0 billed)" : "Cost"
+                    }
+                    value={`${freeTier ? "≈" : ""}${formatUsd(step.costUsd, { precise: true })}`}
+                  />
                 </>
               ) : null}
               <Metric label="Latency" value={formatDuration(step.latencyMs)} />

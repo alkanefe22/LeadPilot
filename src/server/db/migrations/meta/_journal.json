@@ -43,6 +43,13 @@
       "when": 1790265171931,
       "tag": "0005_adapter_health",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790270038924,
+      "tag": "0006_run_billing_tier",
+      "breakpoints": true
     }
   ]
 }

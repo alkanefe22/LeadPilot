@@ -210,9 +210,13 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat
             icon={CoinsIcon}
-            label="Total cost"
+            label={run.billingTier === "free" ? "Est. cost (paid rates)" : "Total cost"}
             value={formatUsd(run.costUsd, { precise: true })}
-            hint="estimated from token usage"
+            hint={
+              run.billingTier === "free"
+                ? "free tier — $0 actually billed"
+                : "estimated from token usage"
+            }
           />
           <Stat
             icon={ClockIcon}
@@ -258,6 +262,7 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
             step={s}
             model={run.model}
             maxLatency={maxLatency}
+            freeTier={run.billingTier === "free"}
             isLast={i === steps.length - 1 && !running}
             approvals={trace.approvals}
           />

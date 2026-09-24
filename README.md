@@ -1,19 +1,19 @@
 # LeadPilot — AI Lead Qualification & Booking Agent
 
 **An autonomous agent that handles inbound leads end to end: it qualifies the lead against your
-Ideal Customer Profile with Claude, asks for missing details, books a meeting when the lead fits,
-updates your CRM and sends the follow-up email — and shows every decision it made in a live,
-inspectable agent trace.**
+Ideal Customer Profile with an LLM (Claude or Gemini), asks for missing details, books a meeting
+when the lead fits, updates your CRM and sends the follow-up email — and shows every decision it
+made in a live, inspectable agent trace.**
 
 Leads come in from an embeddable web form, email replies, or any automation tool (n8n, Zapier, Make)
-via a signed webhook. Runs in **demo mode** with just a Postgres URL and an Anthropic key; add
-Google Calendar, HubSpot and Resend keys to switch to the real integrations.
+via a signed webhook. Runs in **demo mode** with just a Postgres URL and an LLM key (a free Gemini
+key works); add Google Calendar, HubSpot and Resend keys to switch to the real integrations.
 
 ![Live agent trace](docs/media/hero-trace.gif)
 <!-- TODO(media): record docs/media/hero-trace.gif — see docs/media/README.md -->
 
-> Built with Next.js 16 (App Router) · TypeScript (strict) · Postgres + Drizzle · Claude tool use via
-> the official Anthropic SDK · Zod · Tailwind + shadcn/ui · Vitest.
+> Built with Next.js 16 (App Router) · TypeScript (strict) · Postgres + Drizzle · native tool use with
+> **Claude** (official Anthropic SDK) or **Gemini** (REST `generateContent`) · Zod · Tailwind + shadcn/ui · Vitest.
 
 ---
 
@@ -54,8 +54,8 @@ flowchart LR
   I --> DB[("Postgres<br/>leads · threads")]
   I -- "202 now, run in after()" --> L
 
-  subgraph Agent["Agent loop (manual Claude tool use)"]
-    L["Claude<br/>ANTHROPIC_MODEL"] <--> T["8 tools<br/>Zod-validated"]
+  subgraph Agent["Agent loop (manual tool use)"]
+    L["Claude or Gemini<br/>LLM_PROVIDER"] <--> T["8 tools<br/>Zod-validated"]
     T --> G{"Guardrails<br/>policy · approval gate<br/>step / cost / time caps"}
   end
 
@@ -77,9 +77,9 @@ every step can be measured, persisted and guarded:
 1. **Brief.** The system prompt is built from the workspace ICP, rules and threshold (kept byte-stable
    for prompt caching). The lead goes into the first user message: trusted metadata first, then the
    lead’s own words inside a `<lead_content>` fence.
-2. **Loop.** Claude calls tools — `get_lead`, `score_lead`, `ask_followup_question`, `check_availability`,
+2. **Loop.** The model calls tools — `get_lead`, `score_lead`, `ask_followup_question`, `check_availability`,
    `book_meeting`, `upsert_crm_contact`, `send_email`, `mark_disqualified`. Each tool’s Zod schema is both
-   the JSON schema Claude sees and the runtime validator; invalid input comes back as a structured error
+   the JSON schema the model sees and the runtime validator; invalid input comes back as a structured error
    the model can correct.
 3. **Trace.** Every model call (tokens incl. cache reads, estimated cost, latency, stop reason) and every
    tool call (input, output, status) is written as it happens; the UI polls and renders it live.
@@ -96,6 +96,34 @@ every step can be measured, persisted and guarded:
 | **Integrations fail loudly** | Provider calls retry once on 429/5xx with backoff; after that the tool returns a clear error that is recorded in the trace, and Settings shows a red badge with the last error. There is **no silent runtime fallback** to mocks.                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | **Demo safety**              | Seeded and simulated leads never reach a real provider (no emails, no calendar invites). `PUBLIC_DEMO_FORCE_MOCK=true` forces the built-in adapters on a public deployment. A global daily run/cost budget and per-IP rate limits protect the public “Simulate lead” button.                                                                                                                                                                                                                                                                                                                                                                        |
 | **App security**             | Signed admin session (HS256 cookie), read-only public demo with PII masking, DB-backed rate limits on every public write endpoint (form, webhook, email, simulate, login), HMAC/Svix-verified webhooks, input sanitization, `X-Frame-Options` / `frame-ancestors` (only the form is embeddable), and production **refuses to start** with a missing/weak/default `ADMIN_PASSWORD`, a short `SESSION_SECRET` or the dev fake LLM enabled.                                                                                                                                                                                                            |
+
+## Model-agnostic: Claude or Gemini
+
+The agent talks to the model through one small `LlmClient` interface, so the loop, tools, guardrails,
+trace and eval are identical for both providers. Switch with env vars — no code changes:
+
+| Provider             | Env                                                 | Notes                            |
+| -------------------- | --------------------------------------------------- | -------------------------------- |
+| **Anthropic Claude** | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`              | Official SDK, prompt caching on. |
+| **Google Gemini**    | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_TIER=free | paid`                            | REST `generateContent` with function calling; thought signatures are replayed verbatim (required by Gemini 3). |
+
+`LLM_PROVIDER=anthropic|gemini` picks explicitly; if unset, Claude is used when its key and model are
+set, otherwise Gemini. Settings shows the active provider and model.
+
+**Cost labels.** Every step records tokens and an estimated cost from a price table
+(`src/server/llm/pricing.ts`, overridable via `ANTHROPIC_PRICE_*` / `GEMINI_PRICE_*`). On the Gemini
+**free tier** nothing is billed, so the trace and KPIs show the figure as _“est. cost at paid rates”_ and
+note that $0 was billed.
+
+**Rate limits.** Free-tier limits are per project and shown in Google AI Studio (they change, so no
+numbers are hard-coded here). A 429 is retried with backoff (honoring Google’s `retryDelay`); if it
+persists, the run fails with a clear `Gemini error (HTTP 429): RESOURCE_EXHAUSTED …` in the trace and
+Settings shows the error. For `pnpm eval` use `EVAL_CONCURRENCY=1` (default) and `EVAL_CALL_DELAY_MS`
+to stay under per-minute limits.
+
+> ⚠️ **Data use on the free tier.** Google’s pricing page states that content sent on the Gemini API
+> **free tier is used to improve Google’s products**, while paid-tier content is not. Use the free tier
+> for demos with made-up data only; for real client leads use a paid tier (or Claude).
 
 ## Adapters
 
@@ -122,7 +150,7 @@ webhook contract (headers, payload, responses) is in [`examples/README.md`](exam
 
 ## Eval results
 
-`pnpm eval` runs the real agent on a labeled set of 30 leads ([`evals/dataset.ts`](evals/dataset.ts)):
+`pnpm eval` runs the real agent (Claude or Gemini) on a labeled set of 30 leads ([`evals/dataset.ts`](evals/dataset.ts)):
 the 18 demo leads plus 12 extra cases — good fits, missing-info leads, poor fits, spam and vendor pitches,
 seven languages, **two prompt-injection attempts** and **three benign look-alikes**. It reports accuracy, a
 confusion matrix, safety checks (injections blocked, look-alikes not flagged), and average cost and
@@ -130,8 +158,9 @@ latency per lead. The run uses an isolated in-memory database and the built-in a
 
 <!-- EVAL:START -->
 
-> **TODO:** no measured results yet. Run `pnpm eval` with a real `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`
-> — it replaces this block with the measured numbers and writes
+> **TODO:** no measured results yet. Run `pnpm eval` with a real model (`GEMINI_API_KEY` /
+> `GEMINI_MODEL` or `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`) — it replaces this block with the
+> measured numbers (model name included) and writes
 > [`evals/results/latest.md`](evals/results/latest.md). Numbers here are never written by hand.
 
 <!-- EVAL:END -->
@@ -151,13 +180,13 @@ The agent’s behaviour comes from the ICP and rules text in Settings, so the sa
 
 ```bash
 pnpm install
-cp .env.example .env.local        # DATABASE_URL + ANTHROPIC_API_KEY + ANTHROPIC_MODEL
+cp .env.example .env.local        # DATABASE_URL + an LLM: GEMINI_API_KEY/GEMINI_MODEL (free) or ANTHROPIC_*
 pnpm db:local                     # optional: Postgres-compatible local DB via PGlite on :5433 (separate terminal)
 pnpm db:migrate && pnpm db:seed
 pnpm dev                          # http://localhost:3000
 ```
 
-No Anthropic key yet? Set `DEV_FAKE_LLM=true` (development only) to click through the UI with a
+No LLM key yet? Set `DEV_FAKE_LLM=true` (development only) to click through the UI with a
 rule-based stand-in — its runs are labeled `dev-fake-llm` and say nothing about real model behaviour.
 
 ## Scripts
@@ -183,7 +212,9 @@ rule-based stand-in — its runs are labeled `dev-fake-llm` and say nothing abou
    https://vercel.com/new/clone?repository-url=<REPO_URL>&env=DATABASE_URL,ANTHROPIC_API_KEY,ANTHROPIC_MODEL,ADMIN_PASSWORD,SESSION_SECRET,APP_URL -->
 4. Set env vars (every variable is documented in `.env.example`). **Required in production:**
    `DATABASE_URL`, `ADMIN_PASSWORD` (≥ 12 chars, not the dev default), `SESSION_SECRET` (≥ 32 chars),
-   `APP_URL`, and for the agent `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL`. For a **public demo** also set
+   `APP_URL`, and for the agent either `GEMINI_API_KEY` + `GEMINI_MODEL` or `ANTHROPIC_API_KEY` +
+   `ANTHROPIC_MODEL`. (A public demo on the Gemini free tier is fine because it only processes
+   made-up simulated leads.) For a **public demo** also set
    `PUBLIC_DEMO=true`, `PUBLIC_DEMO_FORCE_MOCK=true`, `DEMO_DAILY_RUN_LIMIT`, `DEMO_DAILY_COST_LIMIT_USD`
    and `DEMO_VIDEO_URL`.
 5. Deploy, then check Settings → Integrations, simulate a lead, and send a signed webhook.
@@ -213,7 +244,8 @@ tests/                 Vitest suites
 - The injection scanner is a heuristic and the model is instructed to treat lead text as data; that
   reduces risk but isn’t a guarantee — which is why flagged leads can’t trigger outward actions without approval.
 - The eval set is small (30 cases) and hand-labeled for the default ICP: a regression check, not a benchmark.
-- Cost figures are estimates from token usage and a static price table (`src/server/llm/pricing.ts`).
+- Cost figures are estimates from token usage and a static price table (`src/server/llm/pricing.ts`);
+  on the Gemini free tier they are estimates at paid rates, not charges.
 
 ## License
 

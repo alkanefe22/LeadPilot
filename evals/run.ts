@@ -5,6 +5,7 @@
  *   pnpm eval --limit 5       first N cases only (does not touch README / latest.*)
  *   pnpm eval --only seed-16  comma-separated case ids (does not touch README / latest.*)
  *   pnpm eval --dry           pipeline check with DEV_FAKE_LLM; prints only, writes nothing
+ *   pnpm eval --concurrency 2 --delay 4000   override EVAL_CONCURRENCY / EVAL_CALL_DELAY_MS
  *
  * The whole run uses one isolated in-memory Postgres (PGlite) with the built-in adapters, so
  * an eval never touches your database, calendar, CRM or inbox. Cases are separate leads.
@@ -27,6 +28,8 @@ import * as schema from "../src/server/db/schema";
 import { ensureDefaultWorkspace } from "../src/server/db/seed-lib";
 import { getLlm } from "../src/server/llm/anthropic";
 import { DevFakeLlm } from "../src/server/llm/fake";
+import { ThrottledLlm } from "../src/server/llm/throttle";
+import type { LlmClient } from "../src/server/llm/types";
 import { createInboundLead } from "../src/server/services/intake";
 import { EVAL_CASES, type EvalCase, type Expected } from "./dataset";
 
@@ -62,7 +65,9 @@ const value = (name: string) => {
 const dry = flag("dry");
 const limit = value("limit") ? Number(value("limit")) : undefined;
 const only = value("only")?.split(",");
-const concurrency = Number(value("concurrency") ?? 3);
+// Free-tier friendly defaults: one case at a time, optional delay between model calls.
+const concurrency = Number(value("concurrency") ?? env().EVAL_CONCURRENCY);
+const callDelayMs = Number(value("delay") ?? env().EVAL_CALL_DELAY_MS);
 const partial = Boolean(limit || only);
 
 const bucket = (status: string): Predicted =>
@@ -82,7 +87,7 @@ async function freshDb(): Promise<Database> {
   return db;
 }
 
-async function runCase(db: Database, c: EvalCase): Promise<CaseResult> {
+async function runCase(db: Database, llm: LlmClient, c: EvalCase): Promise<CaseResult> {
   const lead = await createInboundLead(db, {
     workspaceId: "ws_demo",
     source: c.lead.source,
@@ -93,7 +98,6 @@ async function runCase(db: Database, c: EvalCase): Promise<CaseResult> {
     website: c.lead.website,
     message: c.lead.message,
   });
-  const llm = dry ? new DevFakeLlm() : getLlm();
   const out = await runAgent({
     leadId: lead!.id,
     trigger: "eval",
@@ -186,7 +190,11 @@ const quantile = (xs: number[], q: number) => {
   return s[Math.min(s.length - 1, Math.floor(q * s.length))]!;
 };
 
-function report(results: CaseResult[], meta: { model: string; commit: string; date: string }) {
+function report(
+  results: CaseResult[],
+  meta: { model: string; commit: string; date: string; freeTier: boolean },
+) {
+  const costNote = meta.freeTier ? " — estimated at paid rates (free tier billed $0)" : "";
   const classes: Expected[] = ["qualified", "needs_info", "disqualified"];
   const cols: Predicted[] = [...classes, "no_decision"];
   const correct = results.filter((r) => r.correct).length;
@@ -216,9 +224,9 @@ function report(results: CaseResult[], meta: { model: string; commit: string; da
 | --- | --- |
 | Qualification accuracy | ${pct(correct, results.length)} (${correct}/${results.length}) |
 | Safety checks (injection blocked / look-alikes not flagged) | ${safety.filter((r) => r.safetyPass).length}/${safety.length} |
-| Avg cost per lead | ${usd(costs.reduce((a, b) => a + b, 0) / Math.max(1, results.length))} |
-| Avg latency per lead | ${sec(lat.reduce((a, b) => a + b, 0) / Math.max(1, results.length))} (p50 ${sec(quantile(lat, 0.5))}, p95 ${sec(quantile(lat, 0.95))}) |
-| Total eval cost | ${usd(costs.reduce((a, b) => a + b, 0))} |
+| Avg cost per lead${costNote} | ${usd(costs.reduce((a, b) => a + b, 0) / Math.max(1, results.length))} |
+| Avg latency per lead${meta.freeTier ? " (free tier: includes rate-limit waits)" : ""} | ${sec(lat.reduce((a, b) => a + b, 0) / Math.max(1, results.length))} (p50 ${sec(quantile(lat, 0.5))}, p95 ${sec(quantile(lat, 0.95))}) |
+| Total eval cost${costNote} | ${usd(costs.reduce((a, b) => a + b, 0))} |
 | Runs failed / hit step limit | ${failed.length} |
 
 Confusion matrix (rows = expected, columns = agent outcome):
@@ -278,7 +286,7 @@ async function main() {
     );
   } else if (!isLlmConfigured() || env().DEV_FAKE_LLM) {
     console.error(
-      "pnpm eval needs a real model: set ANTHROPIC_API_KEY and ANTHROPIC_MODEL, and DEV_FAKE_LLM=false (use --dry to test the pipeline).",
+      "pnpm eval needs a real model: set GEMINI_API_KEY + GEMINI_MODEL or ANTHROPIC_API_KEY + ANTHROPIC_MODEL, and DEV_FAKE_LLM=false (use --dry to test the pipeline).",
     );
     process.exit(1);
   }
@@ -286,8 +294,15 @@ async function main() {
   let cases = EVAL_CASES;
   if (only) cases = cases.filter((c) => only.includes(c.id));
   if (limit) cases = cases.slice(0, limit);
-  const model = dry ? "dev-fake-llm" : env().ANTHROPIC_MODEL!;
-  console.log(`Running ${cases.length} cases with ${model} (concurrency ${concurrency})…\n`);
+
+  // One shared client so the throttle spaces calls across all concurrent cases; generous
+  // retries because an eval isn't bound by a serverless time limit.
+  const base = dry ? new DevFakeLlm() : getLlm({ geminiRetries: 4, geminiMaxRetryDelayMs: 60_000 });
+  const llm = new ThrottledLlm(base, callDelayMs);
+  const model = llm.model;
+  console.log(
+    `Running ${cases.length} cases with ${model} (concurrency ${concurrency}, ${callDelayMs}ms between model calls)…\n`,
+  );
 
   // One isolated DB per eval run, installed globally because adapters resolve it via getDb().
   const db = await freshDb();
@@ -296,7 +311,7 @@ async function main() {
   const results = await pool(
     cases,
     concurrency,
-    (c) => runCase(db, c),
+    (c) => runCase(db, llm, c),
     (r) => {
       const mark = r.correct ? "✔" : "✘";
       const safety = r.safetyPass === null ? "" : r.safetyPass ? " · safety ok" : " · SAFETY FAIL";
@@ -314,6 +329,7 @@ async function main() {
   }
   const { summary, full } = report(results, {
     model,
+    freeTier: llm.billingTier === "free",
     commit,
     date: new Date().toISOString().slice(0, 10),
   });

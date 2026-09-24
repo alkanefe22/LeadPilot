@@ -88,15 +88,19 @@ export default async function OverviewPage() {
         />
         <Kpi
           icon={CoinsIcon}
-          label="Avg cost / lead"
+          label={s.freeTierRuns ? "Avg cost / lead (est.)" : "Avg cost / lead"}
           value={formatUsd(s.avgCostPerLead, { precise: true })}
-          hint="all runs incl. re-runs"
+          hint={s.freeTierRuns ? "at paid rates · free tier billed $0" : "all runs incl. re-runs"}
         />
         <Kpi
           icon={WalletIcon}
-          label="Agent spend"
+          label={s.freeTierRuns ? "Agent spend (est.)" : "Agent spend"}
           value={formatUsd(s.totalCost)}
-          hint={`${s.totalRuns} runs · avg ${formatDuration(s.avgRunLatencyMs)}`}
+          hint={
+            s.freeTierRuns
+              ? `${s.totalRuns} runs · ${s.freeTierRuns} on free tier ($0 billed)`
+              : `${s.totalRuns} runs · avg ${formatDuration(s.avgRunLatencyMs)}`
+          }
         />
       </div>
 

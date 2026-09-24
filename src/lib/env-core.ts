@@ -43,6 +43,11 @@ export const envSchema = z.object({
   ) as z.ZodType<string>,
 
   // LLM
+  // Which LLM runs the agent. Unset → Anthropic when its key+model exist, else Gemini.
+  LLM_PROVIDER: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.enum(["anthropic", "gemini"]).optional(),
+  ),
   ANTHROPIC_API_KEY: optionalString,
   ANTHROPIC_MODEL: optionalString,
   ANTHROPIC_PRICE_INPUT_PER_MTOK: float,
@@ -65,6 +70,18 @@ export const envSchema = z.object({
   ) as z.ZodType<number>,
   // Wall-clock budget for a single run; keep below the route's maxDuration (60s).
   RUN_TIME_BUDGET_MS: int(50_000, 5_000, 800_000),
+
+  // Google Gemini (alternative provider)
+  GEMINI_API_KEY: optionalString,
+  GEMINI_MODEL: optionalString,
+  // "free" = Google AI Studio free tier (billed $0; costs shown as estimates at paid rates).
+  GEMINI_TIER: z.enum(["free", "paid"]).default("free"),
+  GEMINI_PRICE_INPUT_PER_MTOK: float,
+  GEMINI_PRICE_OUTPUT_PER_MTOK: float,
+
+  // pnpm eval pacing (free-tier friendly defaults)
+  EVAL_CONCURRENCY: int(1, 1, 16),
+  EVAL_CALL_DELAY_MS: int(0, 0, 120_000),
 
   // Auth / demo
   ADMIN_PASSWORD: optionalString,
@@ -171,9 +188,32 @@ export function resetEnvCache() {
   cached = undefined;
 }
 
+export type LlmProvider = "anthropic" | "gemini";
+
+/**
+ * Resolves the active LLM provider:
+ *  - LLM_PROVIDER set → that provider (null if its key/model are missing)
+ *  - otherwise Anthropic when ANTHROPIC_API_KEY + ANTHROPIC_MODEL exist,
+ *    else Gemini when GEMINI_API_KEY + GEMINI_MODEL exist.
+ */
+export function resolveLlmProvider(e: Env = env()): LlmProvider | null {
+  const anthropic = Boolean(e.ANTHROPIC_API_KEY && e.ANTHROPIC_MODEL);
+  const gemini = Boolean(e.GEMINI_API_KEY && e.GEMINI_MODEL);
+  if (e.LLM_PROVIDER === "anthropic") return anthropic ? "anthropic" : null;
+  if (e.LLM_PROVIDER === "gemini") return gemini ? "gemini" : null;
+  return anthropic ? "anthropic" : gemini ? "gemini" : null;
+}
+
 export function isLlmConfigured(e: Env = env()) {
-  return (
-    (e.DEV_FAKE_LLM && e.NODE_ENV !== "production") ||
-    Boolean(e.ANTHROPIC_API_KEY && e.ANTHROPIC_MODEL)
-  );
+  return (e.DEV_FAKE_LLM && e.NODE_ENV !== "production") || resolveLlmProvider(e) !== null;
+}
+
+/** Human label for Settings: provider · model (tier). */
+export function llmLabel(e: Env = env()): string {
+  if (e.DEV_FAKE_LLM && e.NODE_ENV !== "production") return "dev-fake-llm (DEV_FAKE_LLM)";
+  const p = resolveLlmProvider(e);
+  if (p === "anthropic") return `Anthropic · ${e.ANTHROPIC_MODEL}`;
+  if (p === "gemini")
+    return `Gemini · ${e.GEMINI_MODEL} (${e.GEMINI_TIER === "free" ? "free tier" : "paid tier"})`;
+  return e.LLM_PROVIDER ? `${e.LLM_PROVIDER} selected but key/model missing` : "not configured";
 }

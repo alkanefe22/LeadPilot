@@ -137,7 +137,7 @@ export function IntegrationsCard({
   isAdmin,
 }: {
   integrations: IntegrationView[];
-  llm: { label: string; ok: boolean };
+  llm: { label: string; ok: boolean; error?: string | null };
   isAdmin: boolean;
 }) {
   return (
@@ -155,12 +155,24 @@ export function IntegrationsCard({
           <span
             className={cn(
               "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-              llm.ok ? BADGE.ok.className : BADGE.unknown.className,
+              llm.error
+                ? BADGE.failing.className
+                : llm.ok
+                  ? BADGE.ok.className
+                  : BADGE.unknown.className,
             )}
           >
-            {llm.ok ? "Configured" : "Missing"}
+            {llm.error ? "Error" : llm.ok ? "Configured" : "Missing"}
           </span>
         </div>
+        {llm.error ? (
+          <p
+            role="alert"
+            className="-mt-2 mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-2 py-1 text-xs break-words text-red-700 dark:text-red-300"
+          >
+            {llm.error}
+          </p>
+        ) : null}
         <ul className="divide-y">
           {integrations.map((i) => (
             <IntegrationRow key={i.kind} i={i} isAdmin={isAdmin} />

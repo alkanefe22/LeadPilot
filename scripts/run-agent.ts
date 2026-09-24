@@ -11,7 +11,7 @@ import { runAgent, type RunOutcome } from "../src/server/agent/loop";
 import { getDb } from "../src/server/db/client";
 import { agentRuns, leads, type AgentStep } from "../src/server/db/schema";
 import { SEED_LEADS } from "../src/server/db/seed-data";
-import { isLlmConfigured } from "../src/lib/env";
+import { isLlmConfigured, llmLabel } from "../src/lib/env";
 import { LlmNotConfiguredError } from "../src/server/llm/types";
 
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -141,7 +141,7 @@ async function main() {
   console.log(
     `  lead   ${bold(lead.name ?? lead.email ?? lead.id)} ${dim(`<${lead.email ?? "no email"}> · ${lead.company ?? "—"} · ${lead.id}`)}`,
   );
-  console.log(`  model  ${process.env.ANTHROPIC_MODEL ?? "(unset)"}`);
+  console.log(`  model  ${llmLabel()}`);
   console.log(`  says   ${dim(short(lead.message, 160))}`);
   console.log(dim("─".repeat(80)));
 
@@ -160,7 +160,9 @@ main()
     if (err instanceof LlmNotConfiguredError) {
       console.error(red(err.message));
       console.error(
-        dim("Example:\n  ANTHROPIC_API_KEY=sk-ant-...\n  ANTHROPIC_MODEL=claude-sonnet-5"),
+        dim(
+          "Example (free tier):\n  GEMINI_API_KEY=...\n  GEMINI_MODEL=gemini-3.8-flash\nor:\n  ANTHROPIC_API_KEY=sk-ant-...\n  ANTHROPIC_MODEL=claude-sonnet-5",
+        ),
       );
     } else {
       console.error(red(err instanceof Error ? err.message : String(err)));

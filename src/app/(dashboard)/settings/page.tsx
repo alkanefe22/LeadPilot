@@ -5,12 +5,12 @@ import { PageHeader } from "@/components/layout/page-header";
 import { IntegrationsCard } from "@/components/settings/integrations-card";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { env, isLlmConfigured } from "@/lib/env";
+import { env, isLlmConfigured, llmLabel } from "@/lib/env";
 import { formatUsd } from "@/lib/format";
 import { getViewer } from "@/server/auth";
 import { getDb } from "@/server/db/client";
 import { getDemoBudget } from "@/server/services/demo-budget";
-import { getIntegrations } from "@/server/services/integrations";
+import { getIntegrations, getLlmHealth } from "@/server/services/integrations";
 import { currentWorkspaceId, getWorkspace } from "@/server/workspace";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -27,10 +27,8 @@ export default async function SettingsPage() {
     costLimit: e.DEMO_DAILY_COST_LIMIT_USD,
     videoUrl: e.DEMO_VIDEO_URL,
   });
-  const model =
-    e.DEV_FAKE_LLM && e.NODE_ENV !== "production"
-      ? "dev-fake-llm (DEV_FAKE_LLM)"
-      : (e.ANTHROPIC_MODEL ?? "not set");
+  const model = llmLabel(e);
+  const llmHealth = await getLlmHealth();
 
   return (
     <>
@@ -54,7 +52,7 @@ export default async function SettingsPage() {
         <aside className="space-y-4">
           <IntegrationsCard
             integrations={integrations}
-            llm={{ label: model, ok: isLlmConfigured(e) }}
+            llm={{ label: model, ok: isLlmConfigured(e), error: llmHealth }}
             isAdmin={viewer.isAdmin}
           />
           <Card size="sm">

@@ -1,12 +1,13 @@
 import { getDb } from "../db/client";
 import { adapterHealth } from "../db/schema";
 
-export type ProviderName = "google" | "hubspot" | "resend";
+export type ProviderName = "google" | "hubspot" | "resend" | "gemini";
 
 const LABEL: Record<ProviderName, string> = {
   google: "Google Calendar",
   hubspot: "HubSpot",
   resend: "Resend",
+  gemini: "Gemini",
 };
 
 /**
@@ -34,7 +35,7 @@ export class ProviderError extends Error {
         this.status === 401 || this.status === 403
           ? "Credentials are invalid or lack permissions — an admin must fix the integration. Do not retry."
           : this.retryable
-            ? "Temporary provider problem — already retried once. Continue without this action."
+            ? "Temporary provider problem — already retried. Continue without this action."
             : "The provider rejected the request.",
     };
   }
@@ -43,8 +44,12 @@ export class ProviderError extends Error {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type ProviderFetchOptions = {
-  /** Test hook: backoff multiplier (0 in tests). */
+  /** Base backoff between attempts (tests use 0). */
   backoffMs?: number;
+  /** Extra attempts after the first on 429/5xx/network errors. Default 1. */
+  retries?: number;
+  /** Cap for server-suggested waits (Retry-After header / Google RetryInfo). Default 5s. */
+  maxRetryDelayMs?: number;
 };
 
 let defaultBackoffMs = 500;
@@ -53,31 +58,53 @@ export function setProviderBackoff(ms: number) {
   defaultBackoffMs = ms;
 }
 
-async function readError(res: Response): Promise<string> {
+type ParsedError = { message: string; retryDelayMs: number | null };
+
+/** Google RPC errors: { error: { details: [{ "@type": "…RetryInfo", retryDelay: "37s" }] } } */
+function retryInfoMs(j: Record<string, unknown>): number | null {
+  const details = (j.error as { details?: unknown[] } | undefined)?.details;
+  if (!Array.isArray(details)) return null;
+  for (const d of details) {
+    const delay = (d as { retryDelay?: unknown }).retryDelay;
+    if (typeof delay === "string" && /^\d+(\.\d+)?s$/.test(delay)) {
+      return Math.round(parseFloat(delay) * 1000);
+    }
+  }
+  return null;
+}
+
+export async function readError(res: Response): Promise<ParsedError> {
   const text = await res.text().catch(() => "");
   try {
     const j = JSON.parse(text) as Record<string, unknown>;
+    const retryDelayMs = retryInfoMs(j);
     const e = j.error as Record<string, unknown> | string | undefined;
     // OAuth errors: { error: "invalid_grant", error_description: "Token has been expired…" }
     if (typeof e === "string" && typeof j.error_description === "string") {
-      return `${e}: ${j.error_description}`.slice(0, 300);
+      return { message: `${e}: ${j.error_description}`.slice(0, 300), retryDelayMs };
     }
     const msg =
       (typeof e === "object" && e ? (e.message as string) : undefined) ??
       (typeof e === "string" ? e : undefined) ??
       (j.message as string | undefined) ??
       (j.error_description as string | undefined);
-    if (msg) return String(msg).slice(0, 300);
+    // Google APIs add a status like RESOURCE_EXHAUSTED — useful context in the trace.
+    const status =
+      typeof e === "object" && e && typeof e.status === "string" ? `${e.status}: ` : "";
+    if (msg) return { message: `${status}${String(msg)}`.slice(0, 300), retryDelayMs };
   } catch {
     // not JSON
   }
-  return (text || res.statusText || "request failed").slice(0, 300);
+  return {
+    message: (text || res.statusText || "request failed").slice(0, 300),
+    retryDelayMs: null,
+  };
 }
 
 /**
- * fetch() for real providers: JSON by default, one retry on 429/5xx/network errors with
- * backoff (honoring Retry-After up to 5s), typed ProviderError otherwise. Every outcome
- * updates the provider's health row so Settings can show a red badge with the last error.
+ * fetch() for real providers: JSON by default, retries on 429/5xx/network errors with
+ * backoff (honoring Retry-After / RetryInfo up to a cap), typed ProviderError otherwise.
+ * Every outcome updates the provider's health row so Settings can show a red badge.
  */
 export async function providerFetch<T = unknown>(
   provider: ProviderName,
@@ -95,21 +122,24 @@ export async function providerFetch<T = unknown>(
     ...(json !== undefined ? { body: JSON.stringify(json) } : {}),
   };
   const backoff = opts.backoffMs ?? defaultBackoffMs;
+  const attempts = 1 + (opts.retries ?? 1);
+  const maxDelay = opts.maxRetryDelayMs ?? 5000;
 
   let lastError: ProviderError | null = null;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     let res: Response;
     try {
       res = await fetch(url, request);
     } catch (err) {
+      if (request.signal?.aborted) throw err; // run time budget exhausted: not a provider fault
       lastError = new ProviderError(
         provider,
         null,
         `network error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
-      if (attempt === 1) {
-        await sleep(backoff);
+      if (attempt < attempts) {
+        await sleep(backoff * attempt);
         continue;
       }
       break;
@@ -121,12 +151,13 @@ export async function providerFetch<T = unknown>(
       return (text ? JSON.parse(text) : undefined) as T;
     }
     const retryable = res.status === 429 || res.status >= 500;
-    lastError = new ProviderError(provider, res.status, await readError(res), retryable);
-    if (retryable && attempt === 1) {
-      const retryAfter = Number(res.headers.get("retry-after"));
-      await sleep(
-        Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 5000) : backoff,
-      );
+    const parsed = await readError(res);
+    lastError = new ProviderError(provider, res.status, parsed.message, retryable);
+    if (retryable && attempt < attempts) {
+      const header = Number(res.headers.get("retry-after")) * 1000;
+      const suggested =
+        parsed.retryDelayMs ?? (Number.isFinite(header) && header > 0 ? header : null);
+      await sleep(suggested !== null ? Math.min(suggested, maxDelay) : backoff * attempt);
       continue;
     }
     break;

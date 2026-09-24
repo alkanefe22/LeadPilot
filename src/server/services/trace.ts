@@ -14,6 +14,7 @@ export type RunSummary = Pick<
   | "inputTokens"
   | "outputTokens"
   | "costUsd"
+  | "billingTier"
   | "latencyMs"
   | "summary"
   | "error"
@@ -46,6 +47,7 @@ const toRun = (r: AgentRun): RunSummary => ({
   inputTokens: r.inputTokens,
   outputTokens: r.outputTokens,
   costUsd: r.costUsd,
+  billingTier: r.billingTier,
   latencyMs: r.latencyMs,
   summary: r.summary,
   error: r.error,
