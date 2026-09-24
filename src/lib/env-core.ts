@@ -76,6 +76,20 @@ export const envSchema = z.object({
   GEMINI_MODEL: optionalString,
   // "free" = Google AI Studio free tier (billed $0; costs shown as estimates at paid rates).
   GEMINI_TIER: z.enum(["free", "paid"]).default("free"),
+  // Comma-separated models tried in order when the primary returns 503 (overloaded).
+  GEMINI_FALLBACK_MODELS: z.preprocess(
+    (v) =>
+      typeof v === "string"
+        ? v
+            .split(",")
+            .map((m) => m.trim())
+            .filter(Boolean)
+        : [],
+    z.array(z.string()),
+  ) as z.ZodType<string[]>,
+  // Gemini 3 thinkingLevel. "minimal" = lowest level each model supports (models without
+  // "minimal", e.g. 3.8/3.7 Flash, use "low"). "default" = don't send thinkingConfig.
+  GEMINI_THINKING: z.enum(["minimal", "low", "medium", "high", "default"]).default("minimal"),
   GEMINI_PRICE_INPUT_PER_MTOK: float,
   GEMINI_PRICE_OUTPUT_PER_MTOK: float,
 

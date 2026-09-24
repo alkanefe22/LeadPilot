@@ -8,6 +8,10 @@ export type RunState = {
   qualification: Qualification | null;
   approvalsQueued: number;
   outwardActions: string[];
+  /** Tools that succeeded (or were queued for approval) this run, in order. */
+  completedTools?: string[];
+  /** Whether the most recent tool turn returned any error to the model. */
+  lastTurnHadErrors?: boolean;
 };
 
 export type ToolContext = {

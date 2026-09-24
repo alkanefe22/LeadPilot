@@ -49,7 +49,12 @@ export function StepItem({
     step.type === "human"
       ? (step.input as { proposed_payload?: unknown; approved_payload?: unknown; edited?: boolean })
       : null;
-  const out = (step.output ?? {}) as { cache_read_tokens?: number; stop_reason?: string };
+  const out = (step.output ?? {}) as {
+    cache_read_tokens?: number;
+    stop_reason?: string;
+    model?: string;
+  };
+  const viaFallback = step.type === "llm" && !!out.model && out.model !== model;
   const firstPrompt =
     step.type === "llm" && step.idx === 0
       ? (step.input as { system?: string; user?: string } | null)
@@ -80,6 +85,14 @@ export function StepItem({
               )}
             />
             <span className="text-sm font-medium">{stepTitle(step, model)}</span>
+            {viaFallback ? (
+              <span
+                className="rounded-full border border-amber-500/40 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-300"
+                title="The primary model was overloaded (503) or out of daily quota; this call was served by a fallback model."
+              >
+                via {out.model} (fallback)
+              </span>
+            ) : null}
             {step.type === "human" ? (
               <span className="rounded-full border border-sky-500/30 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
                 human-in-the-loop
@@ -145,6 +158,11 @@ export function StepItem({
                   stop_reason: <code className="font-mono text-foreground">{out.stop_reason}</code>
                 </span>
                 <span>cache read: {formatTokens(out.cache_read_tokens ?? 0)} tokens</span>
+                {out.model ? (
+                  <span>
+                    model: <code className="font-mono text-foreground">{out.model}</code>
+                  </span>
+                ) : null}
               </div>
               {step.text ? <JsonView label="Assistant message" value={step.text} /> : null}
               {firstPrompt?.system ? (

@@ -6,7 +6,7 @@ import { runAgent } from "@/server/agent/loop";
 import { anthropicTools } from "@/server/agent/tools";
 import type { Database } from "@/server/db/client";
 import { adapterHealth, agentRuns, agentSteps } from "@/server/db/schema";
-import { GeminiClient, toGeminiSchema } from "@/server/llm/gemini";
+import { GeminiClient, thinkingConfigFor, toGeminiSchema } from "@/server/llm/gemini";
 import { costOf, priceFor } from "@/server/llm/pricing";
 import { ThrottledLlm } from "@/server/llm/throttle";
 import type { LlmClient } from "@/server/llm/types";
@@ -313,5 +313,174 @@ describe("ThrottledLlm (eval pacing)", () => {
     t = 5000;
     await llm.create(req);
     expect(waits).toHaveLength(2); // enough time passed, no wait
+  });
+});
+
+describe("thinking level", () => {
+  it("uses the lowest level each Gemini 3 model supports and omits it otherwise", () => {
+    expect(thinkingConfigFor("gemini-3.6-flash", "minimal")).toEqual({ thinkingLevel: "minimal" });
+    expect(thinkingConfigFor("gemini-3.5-flash-lite", "minimal")).toEqual({
+      thinkingLevel: "minimal",
+    });
+    expect(thinkingConfigFor("gemini-3.1-flash-lite", "minimal")).toEqual({
+      thinkingLevel: "minimal",
+    });
+    // "minimal" is an error on 3.8/3.7 Flash and Pro, so the lowest valid level is "low".
+    expect(thinkingConfigFor("gemini-3.8-flash", "minimal")).toEqual({ thinkingLevel: "low" });
+    expect(thinkingConfigFor("gemini-3.1-pro-preview", "minimal")).toEqual({
+      thinkingLevel: "low",
+    });
+    expect(thinkingConfigFor("gemini-3.8-flash", "high")).toEqual({ thinkingLevel: "high" });
+    expect(thinkingConfigFor("gemini-3.6-flash", "default")).toBeUndefined();
+    expect(thinkingConfigFor("gemini-2.5-flash", "minimal")).toBeUndefined();
+  });
+
+  it("sends thinkingConfig in generationConfig", async () => {
+    const f = mockFetch(() => reply([{ text: "ok" }]));
+    await new GeminiClient("gemini-3.6-flash", "k", { thinking: "minimal" }).create({
+      system: "s",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+      maxTokens: 100,
+    });
+    expect(f.bodyOf(0).generationConfig).toEqual({
+      maxOutputTokens: 100,
+      thinkingConfig: { thinkingLevel: "minimal" },
+    });
+  });
+});
+
+describe("fallback models on 503", () => {
+  const PRIMARY = "gemini-3.8-flash";
+  const FALLBACK = "gemini-3.6-flash";
+  const url = (m: string) =>
+    `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
+  const overloaded = () =>
+    json(503, {
+      error: {
+        code: 503,
+        status: "UNAVAILABLE",
+        message: "This model is currently experiencing high demand.",
+      },
+    });
+
+  it("moves to the fallback immediately, records the serving model per step, and prices it", async () => {
+    let primaryCalls = 0;
+    const f = mockFetch(
+      (c) => {
+        if (c.url !== url(PRIMARY)) return undefined;
+        primaryCalls++;
+        // First turn overloaded; later turns fine.
+        return primaryCalls === 1 ? overloaded() : reply([{ text: "Done." }]);
+      },
+      (c) =>
+        c.url === url(FALLBACK)
+          ? reply([
+              {
+                functionCall: { id: "fc1", name: "score_lead", args: GOOD_SCORE },
+                thoughtSignature: "sigFromFallback",
+              },
+            ])
+          : undefined,
+    );
+    const llm = new GeminiClient(PRIMARY, "k", { fallbackModels: [FALLBACK], maxRetryDelayMs: 0 });
+    const out = await run(llm, (await createLead(db)).id);
+    expect(out.status).toBe("completed");
+    // The 503 is not retried on the primary.
+    expect(f.calls.map((c) => c.url)).toEqual([url(PRIMARY), url(FALLBACK), url(PRIMARY)]);
+
+    const steps = await db.select().from(agentSteps).where(eq(agentSteps.runId, out.runId));
+    const llmSteps = steps.filter((s) => s.type === "llm");
+    expect((llmSteps[0]!.output as { model: string }).model).toBe(FALLBACK);
+    expect((llmSteps[1]!.output as { model: string }).model).toBe(PRIMARY);
+    expect(llmSteps[0]!.costUsd).toBeCloseTo(
+      costOf(
+        {
+          input_tokens: 1000,
+          output_tokens: 120,
+          cache_read_input_tokens: 200,
+          cache_creation_input_tokens: 0,
+        },
+        priceFor(FALLBACK),
+      ),
+      6,
+    );
+
+    // The fallback's signature is not replayed to the primary: the turn is rebuilt with the skip value.
+    const third = f.bodyOf(2) as {
+      contents: { role: string; parts: Record<string, unknown>[] }[];
+    };
+    expect(third.contents[1]!.parts[0]).toMatchObject({
+      thoughtSignature: "skip_thought_signature_validator",
+      functionCall: { id: "fc1", name: "score_lead" },
+    });
+  });
+
+  it("retries the last model in the chain and fails clearly if everything is overloaded", async () => {
+    const f = mockFetch(overloaded);
+    const llm = new GeminiClient(PRIMARY, "k", {
+      fallbackModels: [FALLBACK],
+      retries: 1,
+      maxRetryDelayMs: 0,
+    });
+    const out = await run(llm, (await createLead(db)).id);
+    expect(f.calls.map((c) => c.url)).toEqual([url(PRIMARY), url(FALLBACK), url(FALLBACK)]);
+    expect(out).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("Gemini error (HTTP 503): UNAVAILABLE"),
+    });
+  });
+});
+
+describe("daily quota (429 with a PerDay violation)", () => {
+  const PRIMARY = "gemini-3.6-flash";
+  const FALLBACK = "gemini-3.5-flash-lite";
+  const url = (m: string) =>
+    `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
+  const dailyExhausted = () =>
+    json(429, {
+      error: {
+        code: 429,
+        status: "RESOURCE_EXHAUSTED",
+        message: "You exceeded your current quota, please check your plan and billing details.",
+        details: [
+          {
+            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+            violations: [
+              {
+                quotaMetric:
+                  "generativelanguage.googleapis.com/generate_content_free_tier_requests",
+                quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+                quotaDimensions: { location: "global", model: PRIMARY },
+                quotaValue: "20",
+              },
+            ],
+          },
+          { "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "44s" },
+        ],
+      },
+    });
+
+  it("fails fast (no retries despite RetryInfo) with a clear message", async () => {
+    const f = mockFetch(dailyExhausted);
+    const out = await run(client({ retries: 3 }), (await createLead(db)).id);
+    expect(f.calls).toHaveLength(1);
+    expect(out).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining(
+        `RESOURCE_EXHAUSTED: daily quota exhausted (20 requests/day for ${PRIMARY}`,
+      ),
+    });
+  });
+
+  it("moves on to a fallback model, whose quota is separate", async () => {
+    const f = mockFetch(
+      (c) => (c.url === url(PRIMARY) ? dailyExhausted() : undefined),
+      (c) => (c.url === url(FALLBACK) ? reply([{ text: "Done." }]) : undefined),
+    );
+    const llm = new GeminiClient(PRIMARY, "k", { fallbackModels: [FALLBACK], maxRetryDelayMs: 0 });
+    const out = await run(llm, (await createLead(db)).id);
+    expect(out.status).toBe("completed");
+    expect(f.calls.map((c) => c.url)).toEqual([url(PRIMARY), url(FALLBACK)]);
   });
 });

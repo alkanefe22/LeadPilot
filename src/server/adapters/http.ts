@@ -50,6 +50,8 @@ export type ProviderFetchOptions = {
   retries?: number;
   /** Cap for server-suggested waits (Retry-After header / Google RetryInfo). Default 5s. */
   maxRetryDelayMs?: number;
+  /** Which HTTP statuses to retry. Default: 429 and 5xx. */
+  retryOn?: (status: number) => boolean;
 };
 
 let defaultBackoffMs = 500;
@@ -58,7 +60,32 @@ export function setProviderBackoff(ms: number) {
   defaultBackoffMs = ms;
 }
 
-type ParsedError = { message: string; retryDelayMs: number | null };
+type ParsedError = { message: string; retryDelayMs: number | null; dailyQuota?: boolean };
+
+/**
+ * Google QuotaFailure details. A per-day quota (e.g. the Gemini free tier's
+ * "GenerateRequestsPerDayPerProjectPerModel-FreeTier") won't recover by retrying in
+ * seconds, even though Google still sends a short retryDelay — so we fail fast.
+ */
+function dailyQuota(j: Record<string, unknown>): string | null {
+  const details = (j.error as { details?: unknown[] } | undefined)?.details;
+  if (!Array.isArray(details)) return null;
+  for (const d of details) {
+    const violations = (d as { violations?: unknown[] }).violations;
+    for (const v of Array.isArray(violations) ? violations : []) {
+      const q = v as {
+        quotaId?: string;
+        quotaValue?: string;
+        quotaDimensions?: { model?: string };
+      };
+      if (q.quotaId && /PerDay/i.test(q.quotaId)) {
+        const model = q.quotaDimensions?.model ? ` for ${q.quotaDimensions.model}` : "";
+        return `daily quota exhausted (${q.quotaValue ?? "?"} requests/day${model}; resets at midnight Pacific time)`;
+      }
+    }
+  }
+  return null;
+}
 
 /** Google RPC errors: { error: { details: [{ "@type": "…RetryInfo", retryDelay: "37s" }] } } */
 function retryInfoMs(j: Record<string, unknown>): number | null {
@@ -78,6 +105,15 @@ export async function readError(res: Response): Promise<ParsedError> {
   try {
     const j = JSON.parse(text) as Record<string, unknown>;
     const retryDelayMs = retryInfoMs(j);
+    const daily = dailyQuota(j);
+    if (daily) {
+      const status = (j.error as { status?: string } | undefined)?.status;
+      return {
+        message: `${status ? `${status}: ` : ""}${daily}`,
+        retryDelayMs: null,
+        dailyQuota: true,
+      };
+    }
     const e = j.error as Record<string, unknown> | string | undefined;
     // OAuth errors: { error: "invalid_grant", error_description: "Token has been expired…" }
     if (typeof e === "string" && typeof j.error_description === "string") {
@@ -150,10 +186,11 @@ export async function providerFetch<T = unknown>(
       const text = await res.text();
       return (text ? JSON.parse(text) : undefined) as T;
     }
-    const retryable = res.status === 429 || res.status >= 500;
     const parsed = await readError(res);
+    const retryable = (res.status === 429 || res.status >= 500) && !parsed.dailyQuota;
     lastError = new ProviderError(provider, res.status, parsed.message, retryable);
-    if (retryable && attempt < attempts) {
+    const retryHere = retryable && (opts.retryOn ? opts.retryOn(res.status) : true);
+    if (retryHere && attempt < attempts) {
       const header = Number(res.headers.get("retry-after")) * 1000;
       const suggested =
         parsed.retryDelayMs ?? (Number.isFinite(header) && header > 0 ? header : null);

@@ -119,7 +119,18 @@ note that $0 was billed.
 numbers are hard-coded here). A 429 is retried with backoff (honoring Google’s `retryDelay`); if it
 persists, the run fails with a clear `Gemini error (HTTP 429): RESOURCE_EXHAUSTED …` in the trace and
 Settings shows the error. For `pnpm eval` use `EVAL_CONCURRENCY=1` (default) and `EVAL_CALL_DELAY_MS`
-to stay under per-minute limits.
+to stay under per-minute limits. A **daily** quota (a `…PerDay…` violation in Google’s QuotaFailure)
+is not retried: the run fails at once with _“daily quota exhausted (N requests/day for &lt;model&gt;;
+resets at midnight Pacific time)”_, or moves on to the next `GEMINI_FALLBACK_MODELS` entry.
+
+**Latency and fallbacks.** `GEMINI_THINKING` (default `minimal`) sends the lowest
+`thinkingConfig.thinkingLevel` the model accepts, which roughly halved the median call latency in my
+measurements. `GEMINI_FALLBACK_MODELS` is tried in order when a model answers 503 (overloaded); the
+trace marks such calls _“via &lt;model&gt; (fallback)”_ and prices them at that model’s rate. Free-tier
+latency is not guaranteed — single calls of 25 s+ happen — so a run whose actions all finished but
+whose closing summary hit the time budget is marked **completed** (“Summary skipped (time budget)”),
+not failed. For a reliable public demo on 60 s serverless functions, a paid tier (or Claude) is the
+honest answer.
 
 > ⚠️ **Data use on the free tier.** Google’s pricing page states that content sent on the Gemini API
 > **free tier is used to improve Google’s products**, while paid-tier content is not. Use the free tier

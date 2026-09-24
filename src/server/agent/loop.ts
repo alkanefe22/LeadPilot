@@ -90,6 +90,21 @@ const textOf = (content: Anthropic.ContentBlock[]) =>
     .trim();
 
 /**
+ * True when the standard operating procedure has reached an end state — a terminal action
+ * (disqualified / follow-up asked / booked + confirmation sent, executed or queued for
+ * approval) plus the CRM update (skipped for spam) — and the last tool turn had no errors.
+ */
+export function isWorkComplete(state: RunState): boolean {
+  const done = new Set(state.completedTools ?? []);
+  const terminal =
+    done.has("mark_disqualified") ||
+    done.has("ask_followup_question") ||
+    (done.has("book_meeting") && done.has("send_email"));
+  const crm = done.has("upsert_crm_contact") || state.qualification?.category === "spam";
+  return terminal && crm && !state.lastTurnHadErrors;
+}
+
+/**
  * The agent loop. A manual tool-use loop (rather than the SDK tool runner) because
  * every model call and every tool call is persisted as a trace step with tokens,
  * latency and cost — and guardrails (step cap, cost cap, time budget) run between them.
@@ -100,7 +115,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
   const limits = { ...defaultLimits(), ...opts.limits };
   const llm = opts.llm ?? getLlm();
   const adapters = opts.adapters ?? getAdapters();
-  const price = priceFor(llm.model, llm.priceOverride);
+  // Priced per response: with Gemini fallbacks a step may be served by another model.
+  const priceOf = (model: string) => priceFor(model, llm.priceOverride);
 
   await sweepStaleRuns(db);
 
@@ -163,7 +179,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
   let stepIdx = 0;
   let summary: string | null = null;
 
-  const state: RunState = { qualification: null, approvalsQueued: 0, outwardActions: [] };
+  const state: RunState = {
+    qualification: null,
+    approvalsQueued: 0,
+    outwardActions: [],
+    completedTools: [],
+    lastTurnHadErrors: false,
+  };
   const ctx: ToolContext = {
     db,
     adapters,
@@ -237,7 +259,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
         maxTokens: limits.maxTokens,
         signal: deadline.signal,
       });
-      const stepCost = costOf(res.usage, price);
+      const stepCost = costOf(res.usage, priceOf(res.model));
       totals.inputTokens += totalInputTokens(res.usage);
       totals.outputTokens += res.usage.output_tokens;
       totals.costUsd = Math.round((totals.costUsd + stepCost) * 1e6) / 1e6;
@@ -255,6 +277,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
         input: turn === 0 ? { system, user: brief } : { messages: history.length },
         output: {
           stop_reason: res.stop_reason,
+          // The model that actually answered (differs from the run's model after a fallback).
+          model: res.model,
           tool_calls: toolUses.map((t) => t.name),
           cache_read_tokens: res.usage.cache_read_input_tokens ?? 0,
           cache_write_tokens: res.usage.cache_creation_input_tokens ?? 0,
@@ -294,10 +318,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
 
       history.push({ role: "assistant", content: res.content });
       const results: Anthropic.ToolResultBlockParam[] = [];
+      state.lastTurnHadErrors = false;
       // Sequential on purpose: order matters (score → availability → book → confirm).
       for (const call of toolUses) {
         const t1 = Date.now();
         const exec = await executeToolCall(call.name, call.input, ctx);
+        if (exec.status === "error") state.lastTurnHadErrors = true;
+        else state.completedTools!.push(call.name);
         await recordStep({
           type: "tool",
           toolName: call.name,
@@ -322,6 +349,12 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunOutcome> {
       `Reached MAX_AGENT_STEPS (${limits.maxSteps}) without finishing.`,
     );
   } catch (err) {
+    // Out of time, but the real work is done and only the closing summary was pending:
+    // that's a completed run, not a failure.
+    if (deadline.signal.aborted && isWorkComplete(state)) {
+      summary = `Summary skipped (time budget). Completed: ${[...new Set(state.completedTools)].join(", ")}.`;
+      return await finish(state.approvalsQueued > 0 ? "awaiting_approval" : "completed");
+    }
     const message = deadline.signal.aborted
       ? `Run exceeded its time budget of ${Math.round(limits.timeBudgetMs / 1000)}s.`
       : err instanceof Error

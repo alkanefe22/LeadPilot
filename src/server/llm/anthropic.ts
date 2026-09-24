@@ -59,6 +59,8 @@ export function getLlm(opts: LlmOptions = {}): LlmClient {
   if (provider === "gemini") {
     return new GeminiClient(e.GEMINI_MODEL!, e.GEMINI_API_KEY!, {
       billingTier: e.GEMINI_TIER,
+      fallbackModels: e.GEMINI_FALLBACK_MODELS,
+      thinking: e.GEMINI_THINKING,
       priceOverride: {
         input: e.GEMINI_PRICE_INPUT_PER_MTOK,
         output: e.GEMINI_PRICE_OUTPUT_PER_MTOK,

@@ -94,8 +94,26 @@ export function toGeminiSchema(schema: unknown): unknown {
   return out;
 }
 
+export type GeminiThinking = "minimal" | "low" | "medium" | "high" | "default";
+
+/**
+ * thinkingConfig for a model (ai.google.dev/gemini-api/docs/generate-content/thinking):
+ * Gemini 3 uses `thinkingLevel`; "minimal" is only accepted by 3.6/3.5 Flash and Flash-Lite,
+ * so for 3.8/3.7 Flash and Pro the lowest valid level is "low". Thinking can't be fully
+ * disabled on Gemini 3. Other families (e.g. 2.5, which uses thinkingBudget) get nothing.
+ */
+export function thinkingConfigFor(model: string, level: GeminiThinking) {
+  if (level === "default" || !/^gemini-3/.test(model)) return undefined;
+  const supportsMinimal = /flash-lite/.test(model) || /^gemini-3.[56]-flash/.test(model);
+  const thinkingLevel = level === "minimal" && !supportsMinimal ? "low" : level;
+  return { thinkingLevel };
+}
+
 export type GeminiOptions = {
   billingTier?: "free" | "paid";
+  /** Tried in order when a model answers 503 (overloaded) or its daily quota is exhausted. */
+  fallbackModels?: string[];
+  thinking?: GeminiThinking;
   priceOverride?: { input?: number; output?: number };
   /** Extra attempts on 429/5xx. Free-tier limits are per minute, so allow a few. */
   retries?: number;
@@ -106,8 +124,9 @@ export type GeminiOptions = {
 export class GeminiClient implements LlmClient {
   readonly billingTier: "free" | "paid";
   readonly priceOverride?: { input?: number; output?: number };
-  /** Raw model parts per response, keyed by the content array the loop stores in history. */
-  private readonly rawParts = new WeakMap<object, GeminiPart[]>();
+  /** Raw model parts per response (and the model that produced them), keyed by the content
+   *  array the loop stores in history. */
+  private readonly rawParts = new WeakMap<object, { model: string; parts: GeminiPart[] }>();
   private seq = 0;
 
   constructor(
@@ -120,9 +139,49 @@ export class GeminiClient implements LlmClient {
   }
 
   async create(req: LlmRequest): Promise<LlmResponse> {
-    const body = {
+    const models = [
+      this.model,
+      ...(this.opts.fallbackModels ?? []).filter((m) => m !== this.model),
+    ];
+    for (const [i, model] of models.entries()) {
+      const last = i === models.length - 1;
+      try {
+        const res = await providerFetch<GenerateContentResponse>(
+          "gemini",
+          `${API}/${encodeURIComponent(model)}:generateContent`,
+          {
+            method: "POST",
+            headers: { "x-goog-api-key": this.apiKey },
+            json: this.body(req, model),
+            signal: req.signal,
+          },
+          {
+            retries: this.opts.retries ?? 2,
+            maxRetryDelayMs: this.opts.maxRetryDelayMs ?? 10_000,
+            // With a fallback available, a 503 moves on immediately instead of retrying here;
+            // 429 (rate limit) still backs off on the same model.
+            retryOn: last
+              ? undefined
+              : (status) => status === 429 || (status >= 500 && status !== 503),
+          },
+        );
+        return this.fromResponse(res, model);
+      } catch (err) {
+        // Fall back on overload (503) or an exhausted per-model daily quota (non-retryable 429):
+        // free-tier quotas are per model, so the next model may still have budget.
+        const dailyQuota = err instanceof ProviderError && err.status === 429 && !err.retryable;
+        if (!last && err instanceof ProviderError && (err.status === 503 || dailyQuota)) continue;
+        throw err;
+      }
+    }
+    throw new Error("unreachable");
+  }
+
+  private body(req: LlmRequest, model: string) {
+    const thinkingConfig = thinkingConfigFor(model, this.opts.thinking ?? "default");
+    return {
       systemInstruction: { parts: [{ text: req.system }] },
-      contents: this.toContents(req.messages),
+      contents: this.toContents(req.messages, model),
       tools: [
         {
           functionDeclarations: req.tools.map((t) => ({
@@ -133,23 +192,14 @@ export class GeminiClient implements LlmClient {
         },
       ],
       toolConfig: { functionCallingConfig: { mode: "AUTO" } },
-      generationConfig: { maxOutputTokens: req.maxTokens },
-    };
-    const res = await providerFetch<GenerateContentResponse>(
-      "gemini",
-      `${API}/${encodeURIComponent(this.model)}:generateContent`,
-      {
-        method: "POST",
-        headers: { "x-goog-api-key": this.apiKey },
-        json: body,
-        signal: req.signal,
+      generationConfig: {
+        maxOutputTokens: req.maxTokens,
+        ...(thinkingConfig ? { thinkingConfig } : {}),
       },
-      { retries: this.opts.retries ?? 2, maxRetryDelayMs: this.opts.maxRetryDelayMs ?? 10_000 },
-    );
-    return this.fromResponse(res);
+    };
   }
 
-  private toContents(messages: Anthropic.MessageParam[]): GeminiContent[] {
+  private toContents(messages: Anthropic.MessageParam[], model: string): GeminiContent[] {
     const toolNames = new Map<string, string>();
     const contents: GeminiContent[] = [];
     for (const m of messages) {
@@ -163,7 +213,12 @@ export class GeminiClient implements LlmClient {
       if (m.role === "assistant") {
         for (const b of m.content) if (b.type === "tool_use") toolNames.set(b.id, b.name);
         const raw = this.rawParts.get(m.content);
-        contents.push({ role: "model", parts: raw ?? this.rebuildModelParts(m.content) });
+        // Thought signatures are only meaningful to the model that issued them: after a
+        // fallback switch, rebuild the turn with the documented skip-validator signature.
+        contents.push({
+          role: "model",
+          parts: raw && raw.model === model ? raw.parts : this.rebuildModelParts(m.content),
+        });
         continue;
       }
       const parts: GeminiPart[] = [];
@@ -220,7 +275,7 @@ export class GeminiClient implements LlmClient {
     return parts;
   }
 
-  private fromResponse(res: GenerateContentResponse): LlmResponse {
+  private fromResponse(res: GenerateContentResponse, model: string): LlmResponse {
     const candidate = res.candidates?.[0];
     const usage = res.usageMetadata ?? {};
     const cached = usage.cachedContentTokenCount ?? 0;
@@ -234,7 +289,7 @@ export class GeminiClient implements LlmClient {
 
     if (!candidate) {
       if (res.promptFeedback?.blockReason) {
-        return { model: this.model, content: [], stop_reason: "refusal", usage: anthropicUsage };
+        return { model, content: [], stop_reason: "refusal", usage: anthropicUsage };
       }
       throw new ProviderError("gemini", null, "response contained no candidates", false);
     }
@@ -266,7 +321,7 @@ export class GeminiClient implements LlmClient {
     }
     // Replay exactly what Gemini sent (thought signatures included) on the next turn. Calls
     // without an id (older models) get a local id; their functionResponse is sent without one.
-    this.rawParts.set(content, rawParts);
+    this.rawParts.set(content, { model, parts: rawParts });
 
     const hasCalls = content.some((b) => b.type === "tool_use");
     const stop_reason: Anthropic.StopReason = hasCalls
@@ -276,6 +331,7 @@ export class GeminiClient implements LlmClient {
         : REFUSAL_REASONS.has(reason)
           ? "refusal"
           : "end_turn";
-    return { model: this.model, content, stop_reason, usage: anthropicUsage };
+    // `model` is the one that actually answered (primary or a fallback) — shown in the trace.
+    return { model, content, stop_reason, usage: anthropicUsage };
   }
 }

@@ -48,6 +48,9 @@ type CaseResult = {
   costUsd: number;
   latencyMs: number;
   steps: number;
+  /** Latency of each model call, in order (ms). */
+  callLatencies: number[];
+  summary: string | null;
   flagged: boolean;
   booked: boolean;
   emailsSent: number;
@@ -126,6 +129,12 @@ async function runCase(db: Database, llm: LlmClient, c: EvalCase): Promise<CaseR
   const booked =
     (await db.select().from(schema.bookings).where(eq(schema.bookings.leadId, lead!.id))).length >
     0;
+  const callLatencies = out.runId
+    ? (await db.select().from(schema.agentSteps).where(eq(schema.agentSteps.runId, out.runId)))
+        .filter((s) => s.type === "llm")
+        .sort((a, b) => a.idx - b.idx)
+        .map((s) => s.latencyMs)
+    : [];
   const emailsSent = (
     await db.select().from(schema.emails).where(eq(schema.emails.leadId, lead!.id))
   ).filter((e) => e.status === "sent").length;
@@ -153,6 +162,8 @@ async function runCase(db: Database, llm: LlmClient, c: EvalCase): Promise<CaseR
     costUsd: out.costUsd,
     latencyMs: out.latencyMs,
     steps: out.steps,
+    callLatencies,
+    summary: out.summary,
     flagged,
     booked,
     emailsSent,
@@ -316,7 +327,8 @@ async function main() {
       const mark = r.correct ? "✔" : "✘";
       const safety = r.safetyPass === null ? "" : r.safetyPass ? " · safety ok" : " · SAFETY FAIL";
       console.log(
-        `${mark} ${r.id.padEnd(30)} expected ${r.expected.padEnd(12)} got ${r.finalStatus.padEnd(12)} ${usd(r.costUsd)} ${sec(r.latencyMs)}${safety}${r.runError ? ` · ${r.runStatus}: ${r.runError}` : ""}`,
+        `${mark} ${r.id.padEnd(30)} expected ${r.expected.padEnd(12)} got ${r.finalStatus.padEnd(12)} ${usd(r.costUsd)} ${sec(r.latencyMs)}${safety}${r.runError ? ` · ${r.runStatus}: ${r.runError}` : ""}
+    calls: ${r.callLatencies.map(sec).join(" · ") || "—"}${r.summary?.startsWith("Summary skipped") ? " · summary skipped (time budget)" : ""}`,
       );
     },
   );

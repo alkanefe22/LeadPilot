@@ -43,13 +43,14 @@ function printStep(step: AgentStep) {
       stop_reason?: string;
       tool_calls?: string[];
       cache_read_tokens?: number;
+      model?: string;
     };
     const next = out.tool_calls?.length
       ? `→ ${out.tool_calls.join(", ")}`
       : `→ ${out.stop_reason ?? "?"}`;
     const cache = out.cache_read_tokens ? dim(` (${num(out.cache_read_tokens)} cached)`) : "";
     console.log(
-      `${n} ${magenta("LLM ")}  ${bold(next.padEnd(38))} ${dim(`${num(step.inputTokens)} in · ${num(step.outputTokens)} out`)}${cache} ${yellow(usd(step.costUsd))} ${dim(ms(step.latencyMs))}`,
+      `${n} ${magenta("LLM ")}  ${bold(next.padEnd(38))} ${dim(`${num(step.inputTokens)} in · ${num(step.outputTokens)} out`)}${cache} ${yellow(usd(step.costUsd))} ${dim(ms(step.latencyMs))}${out.model ? dim(` · ${out.model}`) : ""}`,
     );
     if (step.text) {
       for (const line of step.text.split("\n").filter(Boolean).slice(0, 4)) {
@@ -145,7 +146,13 @@ async function main() {
   console.log(`  says   ${dim(short(lead.message, 160))}`);
   console.log(dim("─".repeat(80)));
 
-  const outcome = await runAgent({ leadId, trigger, onStep: printStep });
+  // Local CLI isn't bound by Vercel's 60s function limit (routes keep RUN_TIME_BUDGET_MS).
+  const outcome = await runAgent({
+    leadId,
+    trigger,
+    onStep: printStep,
+    limits: { timeBudgetMs: 180_000 },
+  });
   printOutcome(outcome);
   const [after] = await db
     .select({ status: leads.status, score: leads.score })
