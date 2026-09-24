@@ -495,6 +495,20 @@ describe("adapter selection and fallback", () => {
     });
   });
 
+  it("PUBLIC_DEMO_FORCE_MOCK forces built-in adapters even when every key is set", () => {
+    const s = kinds({
+      PUBLIC_DEMO_FORCE_MOCK: "true",
+      GOOGLE_CLIENT_ID: "a",
+      GOOGLE_CLIENT_SECRET: "b",
+      GOOGLE_REFRESH_TOKEN: "c",
+      HUBSPOT_ACCESS_TOKEN: "pat",
+      RESEND_API_KEY: "re",
+      EMAIL_FROM: "Me <me@x.io>",
+    });
+    expect(s.map((x) => x.active)).toEqual(["mock", "internal", "console"]);
+    expect(s.every((x) => !x.external && x.note?.includes("PUBLIC_DEMO_FORCE_MOCK"))).toBe(true);
+  });
+
   it("built-in adapters pass Test connection without network", async () => {
     const f = mockFetch();
     for (const a of [

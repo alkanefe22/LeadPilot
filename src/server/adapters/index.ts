@@ -33,12 +33,31 @@ type Choice<T> = { adapter: T; status: AdapterStatus };
  * tool errors in the trace and a red badge in Settings (see adapters/http.ts).
  */
 export function selectAdapters(e: Env = env()): { adapters: Adapters; status: AdapterStatus[] } {
+  if (e.PUBLIC_DEMO_FORCE_MOCK) return forcedBuiltins();
   const calendar = pickCalendar(e);
   const crm = pickCrm(e);
   const email = pickEmail(e);
   return {
     adapters: { calendar: calendar.adapter, crm: crm.adapter, email: email.adapter },
     status: [calendar.status, crm.status, email.status],
+  };
+}
+
+const FORCED_NOTE = "PUBLIC_DEMO_FORCE_MOCK is on — built-in adapter used even if real keys exist.";
+
+/** Public demo: nothing a visitor triggers can reach a real calendar, CRM or inbox. */
+function forcedBuiltins(): { adapters: Adapters; status: AdapterStatus[] } {
+  return {
+    adapters: {
+      calendar: new MockCalendarAdapter(),
+      crm: new InternalCrmAdapter(),
+      email: new ConsoleEmailAdapter(),
+    },
+    status: [
+      { kind: "calendar", active: "mock", requested: "forced", note: FORCED_NOTE, external: false },
+      { kind: "crm", active: "internal", requested: "forced", note: FORCED_NOTE, external: false },
+      { kind: "email", active: "console", requested: "forced", note: FORCED_NOTE, external: false },
+    ],
   };
 }
 

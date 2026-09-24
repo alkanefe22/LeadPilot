@@ -70,6 +70,9 @@ export const envSchema = z.object({
   ADMIN_PASSWORD: optionalString,
   SESSION_SECRET: optionalString,
   PUBLIC_DEMO: bool(true),
+  // Public demo deployments: always use the built-in calendar / CRM / email, even if real
+  // integration keys are present. Real integrations are demoed from a local run instead.
+  PUBLIC_DEMO_FORCE_MOCK: bool(false),
   // Global daily budget for simulated (public demo) runs, UTC day.
   DEMO_DAILY_RUN_LIMIT: int(50, 0, 100_000),
   DEMO_DAILY_COST_LIMIT_USD: z.preprocess(
