@@ -107,13 +107,53 @@ export default async function SettingsPage() {
                 <KeyRoundIcon className="size-4" /> Webhook secret
               </CardTitle>
               <CardDescription>
-                HMAC secret for POST /api/inbound/webhook (docs & embed snippet in M4).
+                For n8n / Zapier / Make — see examples/curl-webhook.sh.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <p className="text-muted-foreground">Endpoint</p>
+                <code className="block rounded-md bg-muted px-2 py-1.5 font-mono break-all">
+                  POST {e.APP_URL}/api/inbound/webhook?workspace={ws.id}
+                </code>
+              </div>
+              <div className="space-y-1">
+                <p className="text-muted-foreground">Secret</p>
+                <code className="block truncate rounded-md bg-muted px-2 py-1.5 font-mono">
+                  {viewer.isAdmin
+                    ? ws.webhookSecret
+                    : `${ws.webhookSecret.slice(0, 8)}••••••••••••`}
+                </code>
+              </div>
+              <p className="text-muted-foreground">
+                Headers: <code className="font-mono">X-LeadPilot-Timestamp</code> (unix seconds) and{" "}
+                <code className="font-mono">
+                  X-LeadPilot-Signature: sha256=HMAC(secret, &quot;ts.body&quot;)
+                </code>
+                . Responds 202 with the lead id; retries with the same{" "}
+                <code className="font-mono">external_id</code> (or identical body) are deduplicated.
+              </p>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Embeddable form</CardTitle>
+              <CardDescription>
+                Public page:{" "}
+                <a
+                  href={`/f/${ws.id}`}
+                  className="text-primary hover:underline"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  /f/{ws.id}
+                </a>
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <code className="block truncate rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
-                {viewer.isAdmin ? ws.webhookSecret : `${ws.webhookSecret.slice(0, 8)}••••••••••••`}
-              </code>
+              <pre className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-[11px] leading-relaxed">
+                {`<div data-leadpilot-form="${ws.id}"></div>\n<script src="${e.APP_URL}/embed.js" async></script>`}
+              </pre>
             </CardContent>
           </Card>
         </aside>

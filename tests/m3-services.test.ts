@@ -98,15 +98,13 @@ describe("demo budget", () => {
     };
     const before = await getDemoBudget(db, opts);
     const lead = await createLead(db);
-    await db
-      .insert(agentRuns)
-      .values({
-        leadId: lead.id,
-        trigger: "simulate",
-        model: "t",
-        status: "completed",
-        costUsd: 0.03,
-      });
+    await db.insert(agentRuns).values({
+      leadId: lead.id,
+      trigger: "simulate",
+      model: "t",
+      status: "completed",
+      costUsd: 0.03,
+    });
     const lead2 = await createLead(db);
     await db
       .insert(agentRuns)
@@ -115,15 +113,13 @@ describe("demo budget", () => {
     expect(after.runsToday).toBe(before.runsToday + 1); // rerun doesn't count
     expect(after.costToday).toBeCloseTo(before.costToday + 0.03, 6);
     const lead3 = await createLead(db);
-    await db
-      .insert(agentRuns)
-      .values({
-        leadId: lead3.id,
-        trigger: "simulate",
-        model: "t",
-        status: "completed",
-        costUsd: 0.03,
-      });
+    await db.insert(agentRuns).values({
+      leadId: lead3.id,
+      trigger: "simulate",
+      model: "t",
+      status: "completed",
+      costUsd: 0.03,
+    });
     const limited = await getDemoBudget(db, opts);
     expect(limited.limitReached).toBe(true);
     expect(limited.videoUrl).toBe("https://example.com/v");

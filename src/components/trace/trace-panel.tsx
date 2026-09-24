@@ -259,6 +259,7 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
             model={run.model}
             maxLatency={maxLatency}
             isLast={i === steps.length - 1 && !running}
+            approvals={trace.approvals}
           />
         ))}
         {running ? (

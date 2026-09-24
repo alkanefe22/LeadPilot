@@ -53,9 +53,14 @@ export async function getOverviewStats(
           today: sql<number>`count(*) filter (where ${leads.createdAt} >= ${dayStart.toISOString()}::timestamptz)::int`,
           scored: sql<number>`count(${leads.score})::int`,
           responded: sql<number>`count(${leads.firstResponseAt})::int`,
-          avgResponseMs: sql<
-            number | null
-          >`(avg(extract(epoch from (${leads.firstResponseAt} - ${leads.createdAt}))) * 1000)::float`,
+          // Agent speed: measured from when the agent could first act on the lead (its first
+          // run), not from lead creation — seeded/imported leads were "created" long before.
+          avgResponseMs: sql<number | null>`(avg(extract(epoch from (
+            ${leads.firstResponseAt} - greatest(
+              ${leads.createdAt},
+              (select min(r.started_at) from agent_runs r where r.lead_id = "leads"."id")
+            )
+          ))) * 1000)::float`,
         })
         .from(leads)
         .where(ws),

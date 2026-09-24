@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { rateLimits } from "../db/schema";
 
+export { clientIp } from "./client-ip";
+
 export type RateLimitResult = { ok: boolean; count: number; limit: number; resetAt: Date };
 
 /**
@@ -27,12 +29,6 @@ export async function rateLimit(
     .returning({ count: rateLimits.count });
   const count = row?.count ?? 1;
   return { ok: count <= limit, count, limit, resetAt: new Date(windowStart.getTime() + windowMs) };
-}
-
-/** Best-effort client IP (Vercel sets x-forwarded-for / x-real-ip). */
-export function clientIp(headers: Headers): string {
-  const fwd = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return fwd || headers.get("x-real-ip") || "unknown";
 }
 
 /** Removes windows older than a day. Cheap; called opportunistically. */

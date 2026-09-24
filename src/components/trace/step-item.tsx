@@ -5,7 +5,7 @@ import { createElement, useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatDuration, formatTokens, formatUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { TraceStep } from "@/server/services/trace";
+import type { ApprovalState, TraceStep } from "@/server/services/trace";
 import { describeStep, stepIcon, stepTitle } from "./describe";
 import { JsonView } from "./json-view";
 
@@ -14,6 +14,7 @@ const TONE = {
   ok: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
   error: "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300",
   pending_approval: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300",
+  human: "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-300",
 } as const;
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -30,14 +31,21 @@ export function StepItem({
   model,
   maxLatency,
   isLast,
+  approvals,
 }: {
   step: TraceStep;
   model: string;
   maxLatency: number;
   isLast: boolean;
+  approvals: Record<string, ApprovalState>;
 }) {
   const [open, setOpen] = useState(false);
-  const tone = step.type === "llm" ? TONE.llm : TONE[step.status];
+  const tone =
+    step.type === "llm" ? TONE.llm : step.type === "human" ? TONE.human : TONE[step.status];
+  const humanInput =
+    step.type === "human"
+      ? (step.input as { proposed_payload?: unknown; approved_payload?: unknown; edited?: boolean })
+      : null;
   const out = (step.output ?? {}) as { cache_read_tokens?: number; stop_reason?: string };
   const firstPrompt =
     step.type === "llm" && step.idx === 0
@@ -69,6 +77,11 @@ export function StepItem({
               )}
             />
             <span className="text-sm font-medium">{stepTitle(step, model)}</span>
+            {step.type === "human" ? (
+              <span className="rounded-full border border-sky-500/30 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
+                human-in-the-loop
+              </span>
+            ) : null}
             {step.type === "tool" ? (
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-muted-foreground">
                 {step.toolName}
@@ -99,13 +112,17 @@ export function StepItem({
             {step.type === "llm" && step.text ? (
               <span className="text-foreground/80 italic">“{step.text}” </span>
             ) : null}
-            {describeStep(step)}
+            {describeStep(step, approvals)}
           </p>
           <div className="mt-1.5 ml-5.5 h-1 overflow-hidden rounded-full bg-muted" aria-hidden>
             <div
               className={cn(
                 "h-full rounded-full",
-                step.type === "llm" ? "bg-violet-500/60" : "bg-emerald-500/60",
+                step.type === "llm"
+                  ? "bg-violet-500/60"
+                  : step.type === "human"
+                    ? "bg-sky-500/60"
+                    : "bg-emerald-500/60",
               )}
               style={{ width: `${Math.max(2, (step.latencyMs / Math.max(maxLatency, 1)) * 100)}%` }}
             />
@@ -137,6 +154,15 @@ export function StepItem({
                 </div>
               ) : null}
             </>
+          ) : humanInput ? (
+            <div className="grid gap-3 xl:grid-cols-2">
+              <JsonView label="Proposed by the agent" value={humanInput.proposed_payload} />
+              {humanInput.edited ? (
+                <JsonView label="Approved (edited by admin)" value={humanInput.approved_payload} />
+              ) : (
+                <JsonView label="Decision" value={step.output} />
+              )}
+            </div>
           ) : (
             <div className="grid gap-3 xl:grid-cols-2">
               <JsonView label="Input" value={step.input} />

@@ -29,6 +29,13 @@
       "when": 1790262253400,
       "tag": "0003_trace_json_order",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790263229886,
+      "tag": "0004_human_steps",
+      "breakpoints": true
     }
   ]
 }

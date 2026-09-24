@@ -8,10 +8,12 @@ import {
   GaugeIcon,
   MailIcon,
   MailQuestionIcon,
+  UserCheckIcon,
+  UserXIcon,
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
-import type { TraceStep } from "@/server/services/trace";
+import type { ApprovalState, TraceStep } from "@/server/services/trace";
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj =>
@@ -30,20 +32,32 @@ export const TOOL_META: Record<string, { label: string; icon: LucideIcon }> = {
   mark_disqualified: { label: "Disqualify", icon: BanIcon },
 };
 
+const isRejected = (step: TraceStep) => obj(step.output).decision === "reject";
+
 export function stepIcon(step: TraceStep): LucideIcon {
   if (step.type === "llm") return BotIcon;
+  if (step.type === "human") return isRejected(step) ? UserXIcon : UserCheckIcon;
   return TOOL_META[step.toolName ?? ""]?.icon ?? WrenchIcon;
 }
 
 export function stepTitle(step: TraceStep, model: string): string {
   if (step.type === "llm") return model === "dev-fake-llm" ? "Agent (dev fake LLM)" : "Claude";
+  if (step.type === "human") return isRejected(step) ? "Admin rejected" : "Admin approved";
   return TOOL_META[step.toolName ?? ""]?.label ?? step.toolName ?? "Tool";
 }
 
 /** One human sentence describing what a step did — the timeline's scannable layer. */
-export function describeStep(step: TraceStep): string {
+export function describeStep(
+  step: TraceStep,
+  approvals: Record<string, ApprovalState> = {},
+): string {
   const input = obj(step.input);
   const out = obj(step.output);
+  if (step.type === "human") {
+    const action = TOOL_META[step.toolName ?? ""]?.label ?? step.toolName;
+    const verb = isRejected(step) ? "Rejected" : "Approved";
+    return `${verb} “${action}”${input.edited ? " with an edited payload" : " as proposed"}${input.note ? ` — ${str(input.note)}` : ""}`;
+  }
   if (step.type === "llm") {
     const calls = (out.tool_calls as string[] | undefined) ?? [];
     if (calls.length) {
@@ -53,7 +67,14 @@ export function describeStep(step: TraceStep): string {
     if (out.stop_reason === "end_turn") return "Finished the run";
     return `Stopped: ${str(out.stop_reason)}`;
   }
-  if (step.status === "pending_approval") return "Held for human approval — nothing was sent yet";
+  if (step.status === "pending_approval") {
+    const decision = approvals[str(out.approval_id)];
+    if (decision?.status === "executed")
+      return "Held for approval → approved by admin and executed";
+    if (decision?.status === "failed") return "Held for approval → approved, but execution failed";
+    if (decision?.status === "rejected") return "Held for approval → rejected by admin, never sent";
+    return "Held for human approval — nothing was sent yet";
+  }
   if (step.status === "error") return str(out.error) || "Tool error";
 
   switch (step.toolName) {

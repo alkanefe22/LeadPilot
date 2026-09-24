@@ -1,0 +1,57 @@
+{
+  "name": "LeadPilot – send lead to AI agent",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "7c1f5a0e-1b2d-4c3e-9f10-000000000001",
+      "name": "When clicking ‘Test workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Replace the trigger with your source (Typeform, Webflow, Gmail, CRM…) and map its fields below.\n// Self-hosted n8n: allow the crypto module with NODE_FUNCTION_ALLOW_BUILTIN=crypto.\nconst crypto = require('crypto');\n\n// Paste your workspace webhook secret (LeadPilot → Settings → Webhook secret).\n// Better: store it in an n8n credential/variable instead of hardcoding it here.\nconst SECRET = 'REPLACE_WITH_WEBHOOK_SECRET';\n\nreturn $input.all().map((item, i) => {\n  const src = item.json;\n  const lead = {\n    // Stable id from your source system => n8n retries never create duplicate leads.\n    external_id: String(src.id ?? `n8n-${$execution.id}-${i}`),\n    name: src.name ?? 'Maya Chen',\n    email: src.email ?? 'maya@brightpath.example',\n    company: src.company ?? 'BrightPath Logistics',\n    message: src.message ?? 'We re-key ~300 shipment requests a week into our TMS and want an AI agent for it. Budget ~$18k, start next month.',\n    source: 'n8n',\n  };\n  // Sign the exact string we send: HMAC-SHA256(secret, `${timestamp}.${body}`).\n  const body = JSON.stringify(lead);\n  const timestamp = Math.floor(Date.now() / 1000).toString();\n  const signature = 'sha256=' + crypto.createHmac('sha256', SECRET).update(`${timestamp}.${body}`).digest('hex');\n  return { json: { body, timestamp, signature } };\n});"
+      },
+      "id": "7c1f5a0e-1b2d-4c3e-9f10-000000000002",
+      "name": "Build & sign lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR-APP.vercel.app/api/inbound/webhook?workspace=ws_demo",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-LeadPilot-Timestamp", "value": "={{ $json.timestamp }}" },
+            { "name": "X-LeadPilot-Signature", "value": "={{ $json.signature }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "7c1f5a0e-1b2d-4c3e-9f10-000000000003",
+      "name": "Send to LeadPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0]
+    }
+  ],
+  "connections": {
+    "When clicking ‘Test workflow’": {
+      "main": [[{ "node": "Build & sign lead", "type": "main", "index": 0 }]]
+    },
+    "Build & sign lead": {
+      "main": [[{ "node": "Send to LeadPilot", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

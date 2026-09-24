@@ -82,7 +82,7 @@ export default async function OverviewPage() {
           value={formatDuration(s.avgFirstResponseMs)}
           hint={
             s.respondedLeads
-              ? `received → first email · ${s.respondedLeads} leads`
+              ? `agent start → first email · ${s.respondedLeads} leads`
               : "no emails sent yet"
           }
         />

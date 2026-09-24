@@ -52,7 +52,7 @@ export const runStatus = pgEnum("run_status", [
   "max_steps",
   "awaiting_approval",
 ]);
-export const stepType = pgEnum("step_type", ["llm", "tool"]);
+export const stepType = pgEnum("step_type", ["llm", "tool", "human"]);
 export const stepStatus = pgEnum("step_status", ["ok", "error", "pending_approval"]);
 export const approvalAction = pgEnum("approval_action", [
   "book_meeting",
