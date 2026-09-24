@@ -133,9 +133,6 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
     () => (trace.selectedRunId === run?.id ? trace.steps : []),
     [trace.selectedRunId, trace.steps, run?.id],
   );
-  const maxLatency = useMemo(() => Math.max(1, ...steps.map((s) => s.latencyMs)), [steps]);
-  const llmSteps = steps.filter((s) => s.type === "llm").length;
-  const toolSteps = steps.length - llmSteps;
 
   if (!run) {
     return (
@@ -150,29 +147,68 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
     );
   }
 
-  const duration = running ? now - new Date(run.startedAt).getTime() : run.latencyMs;
+  return (
+    <TraceTimeline
+      runs={trace.runs}
+      run={run}
+      steps={steps}
+      approvals={trace.approvals}
+      durationMs={running ? now - new Date(run.startedAt).getTime() : run.latencyMs}
+      onSelectRun={selectRun}
+    />
+  );
+}
+
+/**
+ * The run header + step timeline. Presentational: the live panel above feeds it from polling,
+ * the public demo's replay feeds it from a recorded run.
+ */
+export function TraceTimeline({
+  runs,
+  run,
+  steps,
+  approvals,
+  durationMs,
+  durationHint,
+  onSelectRun,
+  badge,
+}: {
+  runs: RunSummary[];
+  run: RunSummary;
+  steps: LeadTrace["steps"];
+  approvals: LeadTrace["approvals"];
+  durationMs: number;
+  durationHint?: string;
+  onSelectRun?: (id: string) => void;
+  /** Extra chip next to the model (e.g. "Replay of a real run"). */
+  badge?: React.ReactNode;
+}) {
+  const running = run.status === "running";
+  const maxLatency = Math.max(1, ...steps.map((s) => s.latencyMs));
+  const llmSteps = steps.filter((s) => s.type === "llm").length;
+  const toolSteps = steps.length - llmSteps;
 
   return (
     <div className="space-y-4">
-      {trace.runs.length > 1 ? (
+      {runs.length > 1 ? (
         <div
           className="-mx-1 flex [scrollbar-width:none] gap-1.5 overflow-x-auto px-1 pb-1"
           role="tablist"
           aria-label="Agent runs"
         >
-          {trace.runs.map((r, i) => (
+          {runs.map((r, i) => (
             <button
               key={r.id}
               type="button"
               role="tab"
               aria-selected={r.id === run.id}
-              onClick={() => selectRun(r.id)}
+              onClick={() => onSelectRun?.(r.id)}
               className={cn(
                 "flex shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors",
                 r.id === run.id ? "border-primary bg-primary/5" : "hover:bg-muted",
               )}
             >
-              <span className="font-medium">Run {trace.runs.length - i}</span>
+              <span className="font-medium">Run {runs.length - i}</span>
               <span className="text-muted-foreground">{r.trigger}</span>
               <span
                 className={cn(
@@ -202,6 +238,7 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
           <span className="rounded-md border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
             {run.model}
           </span>
+          {badge}
           <span className="text-xs text-muted-foreground">
             {run.trigger} · started{" "}
             {formatDistanceToNowStrict(new Date(run.startedAt), { addSuffix: true })}
@@ -223,8 +260,8 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
           <Stat
             icon={ClockIcon}
             label="Total time"
-            value={formatDuration(duration)}
-            hint={running ? "live" : "wall clock"}
+            value={formatDuration(durationMs)}
+            hint={durationHint ?? (running ? "live" : "wall clock")}
           />
           <Stat
             icon={CpuIcon}
@@ -266,7 +303,7 @@ export function TracePanel({ leadId, initial }: { leadId: string; initial: LeadT
             maxLatency={maxLatency}
             freeTier={run.billingTier === "free"}
             isLast={i === steps.length - 1 && !running}
-            approvals={trace.approvals}
+            approvals={approvals}
           />
         ))}
         {running ? (

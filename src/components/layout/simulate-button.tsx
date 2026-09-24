@@ -12,11 +12,14 @@ export type SimulateState = {
   limitReached: boolean;
   videoUrl: string | null;
   reason?: string | null;
+  /** Public demo in replay mode: the button plays a recorded real run. */
+  replay?: boolean;
 };
 
 /**
  * Creates a random realistic lead and jumps to its trace so the visitor can
- * watch the agent work live. Handles the daily demo budget and rate limits.
+ * watch the agent work live — or, in replay mode, opens a recorded real run.
+ * Handles the daily demo budget and rate limits.
  */
 export function SimulateButton({ state, className }: { state: SimulateState; className?: string }) {
   const router = useRouter();
@@ -52,10 +55,16 @@ export function SimulateButton({ state, className }: { state: SimulateState; cla
       const res = await fetch("/api/simulate", { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as {
         leadId?: string;
+        replayId?: string;
         error?: string;
         code?: string;
         videoUrl?: string | null;
       };
+      if (res.ok && data.replayId) {
+        toast.success("Replaying a recorded real run of the agent");
+        router.push(`/replay/${data.replayId}`);
+        return;
+      }
       if (res.ok && data.leadId) {
         toast.success("New lead received — watch the agent work");
         router.push(`/leads/${data.leadId}`);

@@ -1,20 +1,31 @@
 import "server-only";
-import { env, isLlmConfigured } from "@/lib/env";
+import { demoMode, env, isLlmConfigured } from "@/lib/env";
 import type { SimulateState } from "@/components/layout/simulate-button";
 import type { Viewer } from "./auth";
 import { getDb } from "./db/client";
+import { loadRecordings } from "./demo/recordings";
 import { getDemoBudget } from "./services/demo-budget";
 import { currentWorkspaceId } from "./workspace";
 
 /** Server-side state for the Simulate button (budget applies to public visitors only). */
 export async function getSimulateState(viewer: Viewer): Promise<SimulateState> {
   const e = env();
+  if (!viewer.isAdmin && viewer.publicDemo && demoMode(e) === "replay") {
+    const available = loadRecordings().length > 0;
+    return {
+      enabled: available,
+      limitReached: false,
+      videoUrl: e.DEMO_VIDEO_URL ?? null,
+      replay: true,
+      reason: available ? null : "No recorded runs to replay yet (pnpm demo:record).",
+    };
+  }
   if (!isLlmConfigured(e)) {
     return {
       enabled: false,
       limitReached: false,
       videoUrl: null,
-      reason: "Set ANTHROPIC_API_KEY and ANTHROPIC_MODEL to enable the agent.",
+      reason: "Configure an LLM provider (see .env.example) to enable the agent.",
     };
   }
   if (!viewer.isAdmin && !viewer.publicDemo) {

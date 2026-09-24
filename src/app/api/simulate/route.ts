@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { env, isLlmConfigured } from "@/lib/env";
+import { demoMode, env, isLlmConfigured } from "@/lib/env";
 import { newId } from "@/lib/ids";
 import { runStartErrorResponse } from "@/server/agent/errors";
 import { startAgentRun } from "@/server/agent/trigger";
 import { getViewer, jsonError } from "@/server/auth";
 import { getDb } from "@/server/db/client";
+import { loadRecordings, pickRecording } from "@/server/demo/recordings";
 import { clientIp, rateLimit } from "@/server/security/rate-limit";
 import { getDemoBudget } from "@/server/services/demo-budget";
 import { createInboundLead } from "@/server/services/intake";
@@ -16,19 +17,27 @@ export const maxDuration = 60;
 
 /**
  * "Simulate lead": creates a random realistic lead and starts the agent on it.
- * Public visitors are limited per IP and by a global daily run/cost budget.
+ * Public visitors are limited per IP and by a global daily run/cost budget — or, in replay mode
+ * (DEMO_MODE=replay, the default for public demos), get a recorded real run to watch instead:
+ * no lead is created and no model is called.
  */
 export async function POST(req: NextRequest) {
   const viewer = await getViewer();
   if (!viewer.isAdmin && !viewer.publicDemo) return jsonError(401, "Login required.");
+  if (!viewer.isAdmin && demoMode() === "replay") {
+    const rec = pickRecording(loadRecordings());
+    if (!rec) {
+      return jsonError(503, "No recorded runs to replay on this deployment yet.", {
+        code: "no_recordings",
+        videoUrl: env().DEMO_VIDEO_URL ?? null,
+      });
+    }
+    return NextResponse.json({ replayId: rec.id }, { status: 200 });
+  }
   if (!isLlmConfigured()) {
-    return jsonError(
-      503,
-      "The agent isn't configured on this deployment (missing Anthropic key).",
-      {
-        code: "llm_not_configured",
-      },
-    );
+    return jsonError(503, "The agent isn't configured on this deployment (no LLM provider).", {
+      code: "llm_not_configured",
+    });
   }
 
   const db = getDb();

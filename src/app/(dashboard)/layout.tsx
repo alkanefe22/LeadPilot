@@ -43,7 +43,9 @@ export default async function DashboardLayout({ children }: LayoutProps<"/">) {
             <EyeIcon className="size-3.5 shrink-0" />
             <span>
               {viewer.authConfigured
-                ? "Read-only public demo — contact details are masked. Hit “Simulate lead” to watch the agent work live."
+                ? simulate.replay
+                  ? "Read-only public demo — contact details are masked. Hit “Simulate lead” to watch a replay of a real agent run."
+                  : "Read-only public demo — contact details are masked. Hit “Simulate lead” to watch the agent work live."
                 : "Read-only mode — set ADMIN_PASSWORD to enable admin actions."}
             </span>
           </div>
