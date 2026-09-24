@@ -1,0 +1,1 @@
+ALTER TABLE "leads" ADD COLUMN "risk_flags" jsonb DEFAULT '[]'::jsonb NOT NULL;

@@ -18,10 +18,11 @@ pnpm dev
 
 ## Scripts
 
-| Script | What it does |
-| --- | --- |
-| `pnpm dev` | Next.js dev server |
-| `pnpm db:local` | Local Postgres-compatible server (PGlite) persisted in `./.pglite` |
-| `pnpm db:migrate` / `db:seed` / `db:reset` | Apply migrations / insert 15 demo leads / wipe + reseed |
-| `pnpm test` | Vitest (unit + in-memory Postgres integration tests) |
-| `pnpm typecheck` / `lint` / `format` | Quality gates |
+| Script                                              | What it does                                                                               |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `pnpm dev`                                          | Next.js dev server                                                                         |
+| `pnpm db:local`                                     | Local Postgres-compatible server (PGlite) persisted in `./.pglite`                         |
+| `pnpm db:migrate` / `db:seed` / `db:reset`          | Apply migrations / insert 16 demo leads (incl. a prompt-injection attempt) / wipe + reseed |
+| `pnpm agent:run <leadId>` / `--seed <n>` / `--list` | Run the agent on one lead and print a live, step-by-step trace                             |
+| `pnpm test`                                         | Vitest (unit + in-memory Postgres integration tests)                                       |
+| `pnpm typecheck` / `lint` / `format`                | Quality gates                                                                              |

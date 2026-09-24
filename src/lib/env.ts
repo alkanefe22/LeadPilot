@@ -49,6 +49,20 @@ export const envSchema = z.object({
   ANTHROPIC_PRICE_INPUT_PER_MTOK: float,
   ANTHROPIC_PRICE_OUTPUT_PER_MTOK: float,
   MAX_AGENT_STEPS: int(12, 1, 50),
+  // Optional `output_config.effort` (low | medium | high | xhigh | max). Only sent when set,
+  // because not every model accepts it.
+  ANTHROPIC_EFFORT: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+  ),
+  // Guardrails: per-call output cap and per-run spend cap.
+  LLM_MAX_TOKENS: int(8000, 256, 64000),
+  MAX_COST_PER_RUN_USD: z.preprocess(
+    (v) => (v === undefined || v === "" ? 0.1 : v),
+    z.coerce.number().positive(),
+  ) as z.ZodType<number>,
+  // Wall-clock budget for a single run; keep below the route's maxDuration (60s).
+  RUN_TIME_BUDGET_MS: int(50_000, 5_000, 800_000),
 
   // Auth / demo
   ADMIN_PASSWORD: optionalString,

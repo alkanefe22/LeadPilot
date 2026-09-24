@@ -86,14 +86,20 @@ export const workspaces = pgTable("workspaces", {
   createdAt: createdAt(),
 });
 
+export type LeadCategory = "fit" | "needs_info" | "poor_fit" | "spam";
+
 export type Qualification = {
   score: number;
+  category: LeadCategory;
   reasoning: string;
   budget: string | null;
   timeline: string | null;
   need: string | null;
   authority: string | null;
   missing: string[];
+  language?: string | null;
+  flaggedForReview?: boolean;
+  disqualification?: { reason: string; category: string } | null;
 };
 
 export const leads = pgTable(
@@ -116,6 +122,9 @@ export const leads = pgTable(
     status: leadStatus("status").notNull().default("new"),
     score: integer("score"),
     qualification: jsonb("qualification").$type<Qualification>(),
+    // Heuristic flags from the inbound scanner (e.g. "prompt_injection"). Flagged leads
+    // can never trigger outward actions without a human approval.
+    riskFlags: jsonb("risk_flags").$type<string[]>().notNull().default([]),
     threadToken: text("thread_token")
       .notNull()
       .unique()
