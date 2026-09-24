@@ -45,3 +45,6 @@ next-env.d.ts
 
 # env: keep the documented example
 !.env.example
+
+# In-progress eval (pnpm eval --resume)
+evals/results/partial.json

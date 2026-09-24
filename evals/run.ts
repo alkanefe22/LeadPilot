@@ -1,7 +1,9 @@
 /**
- * pnpm eval — runs the real agent (ANTHROPIC_MODEL) on the labeled set in evals/dataset.ts.
+ * pnpm eval — runs the real agent (configured LLM) on the labeled set in evals/dataset.ts.
  *
  *   pnpm eval                 full run, writes evals/results/latest.{md,json} and updates README
+ *   pnpm eval --resume        continue from evals/results/partial.json (e.g. after a quota stop)
+ *   pnpm eval --fresh         discard partial.json and start over
  *   pnpm eval --limit 5       first N cases only (does not touch README / latest.*)
  *   pnpm eval --only seed-16  comma-separated case ids (does not touch README / latest.*)
  *   pnpm eval --dry           pipeline check with DEV_FAKE_LLM; prints only, writes nothing
@@ -9,17 +11,23 @@
  *
  * The whole run uses one isolated in-memory Postgres (PGlite) with the built-in adapters, so
  * an eval never touches your database, calendar, CRM or inbox. Cases are separate leads.
+ *
+ * Full runs save every finished case to evals/results/partial.json. A rate-limit/quota or other
+ * provider error stops the eval cleanly — the interrupted case is NOT recorded as a result — and
+ * `--resume` picks up the remaining cases later. README / latest.* are written only once every
+ * case is done. Each case records the provider and exact model(s) that served it.
  */
 import "../scripts/load-env";
 import { execSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
-import { env, isLlmConfigured } from "../src/lib/env";
+import { env, isLlmConfigured, llmLabel } from "../src/lib/env";
 import { MockCalendarAdapter } from "../src/server/adapters/calendar/mock";
+import { ProviderError } from "../src/server/adapters/http";
 import { InternalCrmAdapter } from "../src/server/adapters/crm/internal";
 import { ConsoleEmailAdapter } from "../src/server/adapters/email/console";
 import { runAgent } from "../src/server/agent/loop";
@@ -29,7 +37,7 @@ import { ensureDefaultWorkspace } from "../src/server/db/seed-lib";
 import { getLlm } from "../src/server/llm/anthropic";
 import { DevFakeLlm } from "../src/server/llm/fake";
 import { ThrottledLlm } from "../src/server/llm/throttle";
-import type { LlmClient } from "../src/server/llm/types";
+import type { LlmClient, LlmRequest, LlmResponse } from "../src/server/llm/types";
 import { createInboundLead } from "../src/server/services/intake";
 import { EVAL_CASES, type EvalCase, type Expected } from "./dataset";
 
@@ -51,6 +59,12 @@ type CaseResult = {
   /** Latency of each model call, in order (ms). */
   callLatencies: number[];
   summary: string | null;
+  /** Provider label at run time, e.g. "Gemini · gemini-3.6-flash (free tier)". */
+  provider: string;
+  /** Model(s) that actually answered this case's calls (a fallback may differ from the primary). */
+  models: string[];
+  finishedAt: string;
+  commit: string;
   flagged: boolean;
   booked: boolean;
   emailsSent: number;
@@ -71,7 +85,61 @@ const only = value("only")?.split(",");
 // Free-tier friendly defaults: one case at a time, optional delay between model calls.
 const concurrency = Number(value("concurrency") ?? env().EVAL_CONCURRENCY);
 const callDelayMs = Number(value("delay") ?? env().EVAL_CALL_DELAY_MS);
-const partial = Boolean(limit || only);
+const subset = Boolean(limit || only);
+const resume = flag("resume");
+const fresh = flag("fresh");
+const PARTIAL_FILE = "evals/results/partial.json";
+
+type PartialFile = { version: 1; updatedAt: string; results: CaseResult[] };
+
+function readPartial(): CaseResult[] {
+  if (!existsSync(PARTIAL_FILE)) return [];
+  const data = JSON.parse(readFileSync(PARTIAL_FILE, "utf8")) as PartialFile;
+  return data.version === 1 ? data.results : [];
+}
+
+function writePartial(results: CaseResult[]) {
+  mkdirSync("evals/results", { recursive: true });
+  const data: PartialFile = { version: 1, updatedAt: new Date().toISOString(), results };
+  writeFileSync(
+    PARTIAL_FILE,
+    `${JSON.stringify(data, null, 2)}
+`,
+  );
+}
+
+/** Rate limits, quotas, overload and network failures: the provider's fault, not the agent's. */
+function isProviderOutage(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (typeof status === "number") return status === 429 || status >= 500;
+  const name = (err as { name?: string } | null)?.name ?? "";
+  if (name === "APIConnectionError" || name === "APIConnectionTimeoutError") return true;
+  return err instanceof ProviderError && (err.retryable || err.status === null);
+}
+
+/** Remembers the first provider outage so the eval can stop instead of scoring it as a miss. */
+class OutageDetector implements LlmClient {
+  outage: Error | null = null;
+  constructor(private readonly inner: LlmClient) {}
+  get model() {
+    return this.inner.model;
+  }
+  get billingTier() {
+    return this.inner.billingTier;
+  }
+  get priceOverride() {
+    return this.inner.priceOverride;
+  }
+  async create(req: LlmRequest): Promise<LlmResponse> {
+    try {
+      return await this.inner.create(req);
+    } catch (err) {
+      if (isProviderOutage(err))
+        this.outage ??= err instanceof Error ? err : new Error(String(err));
+      throw err;
+    }
+  }
+}
 
 const bucket = (status: string): Predicted =>
   status === "qualified" || status === "booked"
@@ -90,7 +158,12 @@ async function freshDb(): Promise<Database> {
   return db;
 }
 
-async function runCase(db: Database, llm: LlmClient, c: EvalCase): Promise<CaseResult> {
+async function runCase(
+  db: Database,
+  llm: LlmClient,
+  c: EvalCase,
+  meta: { provider: string; commit: string },
+): Promise<CaseResult> {
   const lead = await createInboundLead(db, {
     workspaceId: "ws_demo",
     source: c.lead.source,
@@ -129,12 +202,15 @@ async function runCase(db: Database, llm: LlmClient, c: EvalCase): Promise<CaseR
   const booked =
     (await db.select().from(schema.bookings).where(eq(schema.bookings.leadId, lead!.id))).length >
     0;
-  const callLatencies = out.runId
+  const llmSteps = out.runId
     ? (await db.select().from(schema.agentSteps).where(eq(schema.agentSteps.runId, out.runId)))
         .filter((s) => s.type === "llm")
         .sort((a, b) => a.idx - b.idx)
-        .map((s) => s.latencyMs)
     : [];
+  const callLatencies = llmSteps.map((s) => s.latencyMs);
+  const models = [
+    ...new Set(llmSteps.map((s) => (s.output as { model?: string } | null)?.model ?? llm.model)),
+  ];
   const emailsSent = (
     await db.select().from(schema.emails).where(eq(schema.emails.leadId, lead!.id))
   ).filter((e) => e.status === "sent").length;
@@ -164,6 +240,10 @@ async function runCase(db: Database, llm: LlmClient, c: EvalCase): Promise<CaseR
     steps: out.steps,
     callLatencies,
     summary: out.summary,
+    provider: meta.provider,
+    models: models.length ? models : [llm.model],
+    finishedAt: new Date().toISOString(),
+    commit: meta.commit,
     flagged,
     booked,
     emailsSent,
@@ -172,24 +252,23 @@ async function runCase(db: Database, llm: LlmClient, c: EvalCase): Promise<CaseR
   };
 }
 
+/** Runs fn over items with n workers; stops taking new items once shouldStop() is true. */
 async function pool<T, R>(
   items: T[],
   n: number,
   fn: (t: T) => Promise<R>,
   onDone: (r: R) => void,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
+  shouldStop: () => boolean,
+): Promise<void> {
   let next = 0;
   await Promise.all(
     Array.from({ length: Math.min(n, items.length) }, async () => {
-      while (next < items.length) {
-        const i = next++;
-        results[i] = await fn(items[i]!);
-        onDone(results[i]!);
+      while (next < items.length && !shouldStop()) {
+        const r = await fn(items[next++]!);
+        onDone(r);
       }
     }),
   );
-  return results;
 }
 
 const pct = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : "—");
@@ -201,11 +280,31 @@ const quantile = (xs: number[], q: number) => {
   return s[Math.min(s.length - 1, Math.floor(q * s.length))]!;
 };
 
-function report(
-  results: CaseResult[],
-  meta: { model: string; commit: string; date: string; freeTier: boolean },
-) {
-  const costNote = meta.freeTier ? " — estimated at paid rates (free tier billed $0)" : "";
+/** "model `x` via <provider>" — or every provider/model with its case count. */
+function describeModels(results: CaseResult[]): string {
+  const counts = new Map<string, number>();
+  for (const r of results) {
+    const key = `\`${r.models.join(" + ")}\` via ${r.provider}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const entries = [...counts];
+  if (entries.length === 1) return `model ${entries[0]![0]}`;
+  return `models ${entries.map(([k, n]) => `${k} (${n} cases)`).join(", ")}`;
+}
+
+const span = (xs: string[]) => {
+  const sorted = [...new Set(xs)].sort();
+  return sorted.length <= 1 ? (sorted[0] ?? "—") : `${sorted[0]} → ${sorted.at(-1)}`;
+};
+
+function report(results: CaseResult[], meta: { freeTier: boolean; local: boolean }) {
+  const costNote = meta.freeTier
+    ? " — estimated at paid rates (free tier billed $0)"
+    : meta.local
+      ? " (local model — nothing billed)"
+      : "";
+  const dates = span(results.map((r) => r.finishedAt.slice(0, 10)));
+  const commits = [...new Set(results.map((r) => r.commit))].map((c) => `\`${c}\``).join(", ");
   const classes: Expected[] = ["qualified", "needs_info", "disqualified"];
   const cols: Predicted[] = [...classes, "no_decision"];
   const correct = results.filter((r) => r.correct).length;
@@ -229,7 +328,7 @@ function report(
     })
     .join("\n");
 
-  const summary = `**${correct}/${results.length} correct (${pct(correct, results.length)})** · model \`${meta.model}\` · ${meta.date} · commit \`${meta.commit}\`
+  const summary = `**${correct}/${results.length} correct (${pct(correct, results.length)})** · ${describeModels(results)} · ${dates} · commit ${commits}
 
 | Metric | Value |
 | --- | --- |
@@ -258,12 +357,12 @@ ${perClass}
 
 ## Cases
 
-| Case | Kind | Expected | Outcome | Score | Flagged | Booked | Emails | Safety | Cost | Latency | Note |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Case | Kind | Expected | Outcome | Score | Flagged | Booked | Emails | Safety | Cost | Latency | Provider · model | Note |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${results
   .map(
     (r) =>
-      `| ${r.correct ? "✅" : "❌"} ${r.id} | ${r.kind ?? ""} | ${r.expected} | ${r.finalStatus}${r.runError ? ` (${r.runStatus}: ${r.runError.slice(0, 60)})` : ""} | ${r.score ?? "—"} | ${r.flagged ? "yes" : "no"} | ${r.booked ? "yes" : "no"} | ${r.emailsSent} | ${r.safetyPass === null ? "" : r.safetyPass ? "pass" : "**FAIL**"} | ${usd(r.costUsd)} | ${sec(r.latencyMs)} | ${r.note} |`,
+      `| ${r.correct ? "✅" : "❌"} ${r.id} | ${r.kind ?? ""} | ${r.expected} | ${r.finalStatus}${r.runError ? ` (${r.runStatus}: ${r.runError.slice(0, 60)})` : ""} | ${r.score ?? "—"} | ${r.flagged ? "yes" : "no"} | ${r.booked ? "yes" : "no"} | ${r.emailsSent} | ${r.safetyPass === null ? "" : r.safetyPass ? "pass" : "**FAIL**"} | ${usd(r.costUsd)} | ${sec(r.latencyMs)} | ${r.provider.split(" · ")[0]} · \`${r.models.join(" + ")}\` | ${r.note} |`,
   )
   .join("\n")}
 
@@ -306,58 +405,115 @@ async function main() {
   if (only) cases = cases.filter((c) => only.includes(c.id));
   if (limit) cases = cases.slice(0, limit);
 
+  // Full runs are resumable; subsets (--only/--limit) and dry runs never touch partial.json.
+  const resumable = !dry && !subset;
+  let done: CaseResult[] = [];
+  if (resumable && existsSync(PARTIAL_FILE)) {
+    if (fresh) {
+      rmSync(PARTIAL_FILE);
+    } else if (!resume) {
+      const prev = readPartial();
+      const providers = [...new Set(prev.map((r) => r.provider))].join(", ");
+      console.error(
+        `Found ${PARTIAL_FILE} with ${prev.length}/${EVAL_CASES.length} cases done (${providers}).\n` +
+          "Continue with `pnpm eval --resume` or start over with `pnpm eval --fresh`.",
+      );
+      process.exit(1);
+    } else {
+      const ids = new Set(EVAL_CASES.map((c) => c.id));
+      done = readPartial().filter((r) => ids.has(r.id));
+    }
+  } else if (resume && resumable) {
+    console.log("No partial results found — starting a full run.");
+  }
+  const doneIds = new Set(done.map((r) => r.id));
+  const todo = cases.filter((c) => !doneIds.has(c.id));
+
   // One shared client so the throttle spaces calls across all concurrent cases; generous
   // retries because an eval isn't bound by a serverless time limit.
   const base = dry ? new DevFakeLlm() : getLlm({ geminiRetries: 4, geminiMaxRetryDelayMs: 60_000 });
-  const llm = new ThrottledLlm(base, callDelayMs);
-  const model = llm.model;
-  console.log(
-    `Running ${cases.length} cases with ${model} (concurrency ${concurrency}, ${callDelayMs}ms between model calls)…\n`,
-  );
-
-  // One isolated DB per eval run, installed globally because adapters resolve it via getDb().
-  const db = await freshDb();
-  setDb(db);
-  const started = Date.now();
-  const results = await pool(
-    cases,
-    concurrency,
-    (c) => runCase(db, llm, c),
-    (r) => {
-      const mark = r.correct ? "✔" : "✘";
-      const safety = r.safetyPass === null ? "" : r.safetyPass ? " · safety ok" : " · SAFETY FAIL";
-      console.log(
-        `${mark} ${r.id.padEnd(30)} expected ${r.expected.padEnd(12)} got ${r.finalStatus.padEnd(12)} ${usd(r.costUsd)} ${sec(r.latencyMs)}${safety}${r.runError ? ` · ${r.runStatus}: ${r.runError}` : ""}
-    calls: ${r.callLatencies.map(sec).join(" · ") || "—"}${r.summary?.startsWith("Summary skipped") ? " · summary skipped (time budget)" : ""}`,
-      );
-    },
-  );
-
+  const detector = new OutageDetector(base);
+  const llm = new ThrottledLlm(detector, callDelayMs);
+  const provider = dry ? "dev fake LLM (dry run)" : llmLabel();
   let commit = "unknown";
   try {
     commit = execSync("git rev-parse --short HEAD").toString().trim();
   } catch {
     // not a git checkout
   }
-  const { summary, full } = report(results, {
-    model,
+  const earlier = [...new Set(done.map((r) => r.provider))].filter((p) => p !== provider);
+  if (earlier.length) {
+    console.warn(
+      `⚠ Resuming with ${provider}; earlier cases used ${earlier.join(", ")}. The report lists the model per case.\n`,
+    );
+  }
+  console.log(
+    `${done.length ? `Resuming: ${done.length} done, ` : ""}running ${todo.length} cases with ${provider} (concurrency ${concurrency}, ${callDelayMs}ms between model calls)…\n`,
+  );
+
+  // One isolated DB per eval run, installed globally because adapters resolve it via getDb().
+  const db = await freshDb();
+  setDb(db);
+  const started = Date.now();
+  const finished: CaseResult[] = [];
+  await pool(
+    todo,
+    concurrency,
+    (c) => runCase(db, llm, c, { provider, commit }),
+    (r) => {
+      // A case interrupted by a provider outage is not a result: drop it, --resume re-runs it.
+      if (detector.outage && r.runStatus === "failed") {
+        console.log(`… ${r.id.padEnd(30)} interrupted by a provider error — not recorded`);
+        return;
+      }
+      finished.push(r);
+      if (resumable) writePartial([...done, ...finished]);
+      const mark = r.correct ? "✔" : "✘";
+      const safety = r.safetyPass === null ? "" : r.safetyPass ? " · safety ok" : " · SAFETY FAIL";
+      console.log(
+        `${mark} ${r.id.padEnd(30)} expected ${r.expected.padEnd(12)} got ${r.finalStatus.padEnd(12)} ${usd(r.costUsd)} ${sec(r.latencyMs)}${safety}${r.runError ? ` · ${r.runStatus}: ${r.runError}` : ""}
+    ${r.models.join(" + ")} · calls: ${r.callLatencies.map(sec).join(" · ") || "—"}${r.summary?.startsWith("Summary skipped") ? " · summary skipped (time budget)" : ""}`,
+      );
+    },
+    () => detector.outage !== null,
+  );
+
+  const byId = new Map([...done, ...finished].map((r) => [r.id, r]));
+  const ordered = cases.map((c) => byId.get(c.id)).filter((r): r is CaseResult => Boolean(r));
+  const { summary, full } = report(ordered, {
     freeTier: llm.billingTier === "free",
-    commit,
-    date: new Date().toISOString().slice(0, 10),
+    local: llm.billingTier === "local",
   });
   console.log(`\n${summary}\n\nWall time ${sec(Date.now() - started)}.`);
 
-  if (dry || partial) {
+  if (detector.outage) {
+    const saved = resumable
+      ? ` and saved to ${PARTIAL_FILE}. Continue later with \`pnpm eval --resume\``
+      : "";
+    console.error(
+      `\n■ Stopped: ${detector.outage.message}\n  ${ordered.length}/${cases.length} cases done${saved}.`,
+    );
+    process.exitCode = 2;
+    return;
+  }
+  if (dry || subset) {
     console.log(`\n(${dry ? "dry run" : "partial run"}: results not written)`);
+    return;
+  }
+  if (ordered.length < EVAL_CASES.length) {
+    console.log(
+      `\n${ordered.length}/${EVAL_CASES.length} cases done — README / latest.* not written yet.`,
+    );
     return;
   }
   mkdirSync("evals/results", { recursive: true });
   writeFileSync("evals/results/latest.md", full);
   writeFileSync(
     "evals/results/latest.json",
-    JSON.stringify({ model, commit, date: new Date().toISOString(), results }, null, 2),
+    JSON.stringify({ date: new Date().toISOString(), results: ordered }, null, 2),
   );
   updateReadme(summary);
+  rmSync(PARTIAL_FILE, { force: true });
   console.log(
     "\n✔ Wrote evals/results/latest.md, latest.json and updated the README eval section.",
   );
