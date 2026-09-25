@@ -35,6 +35,13 @@ export const intFrom = (min: number, max: number) =>
     z.number().int().min(min).max(max),
   );
 
+/** Like intFrom, but values above max are capped instead of rejected (e.g. a search window). */
+export const cappedInt = (min: number, max: number) =>
+  z.preprocess((v) => {
+    const n = typeof v === "string" && /^\s*-?\d+(\.\d+)?\s*$/.test(v) ? Number(v) : v;
+    return typeof n === "number" && n > max ? max : n;
+  }, z.number().int().min(min).max(max));
+
 export const nullableText = (max: number, description: string) =>
   z
     .string()

@@ -52,9 +52,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "get_lead"
-          ],
+          "tool_calls": ["get_lead"],
           "cache_read_tokens": 2251,
           "cache_write_tokens": 0
         },
@@ -117,9 +115,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "score_lead"
-          ],
+          "tool_calls": ["score_lead"],
           "cache_read_tokens": 3060,
           "cache_write_tokens": 0
         },
@@ -175,9 +171,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "check_availability"
-          ],
+          "tool_calls": ["check_availability"],
           "cache_read_tokens": 3337,
           "cache_write_tokens": 0
         },
@@ -201,9 +195,7 @@
         },
         "output": {
           "error": "Invalid input",
-          "issues": [
-            "days_ahead: Too big: expected number to be <=21"
-          ]
+          "issues": ["days_ahead: Too big: expected number to be <=21"]
         },
         "text": null,
         "inputTokens": 0,
@@ -225,9 +217,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "check_availability"
-          ],
+          "tool_calls": ["check_availability"],
           "cache_read_tokens": 3613,
           "cache_write_tokens": 0
         },
@@ -301,9 +291,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "book_meeting"
-          ],
+          "tool_calls": ["book_meeting"],
           "cache_read_tokens": 3695,
           "cache_write_tokens": 0
         },
@@ -349,9 +337,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "book_meeting"
-          ],
+          "tool_calls": ["book_meeting"],
           "cache_read_tokens": 4131,
           "cache_write_tokens": 0
         },
@@ -403,9 +389,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "send_email"
-          ],
+          "tool_calls": ["send_email"],
           "cache_read_tokens": 4254,
           "cache_write_tokens": 0
         },
@@ -454,9 +438,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "upsert_crm_contact"
-          ],
+          "tool_calls": ["upsert_crm_contact"],
           "cache_read_tokens": 4531,
           "cache_write_tokens": 0
         },
@@ -537,13 +519,7 @@
         "need": null,
         "score": 25,
         "budget": null,
-        "missing": [
-          "budget",
-          "timeline",
-          "need",
-          "authority",
-          "company"
-        ],
+        "missing": ["budget", "timeline", "need", "authority", "company"],
         "category": "needs_info",
         "language": "en",
         "timeline": null,
@@ -577,9 +553,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "score_lead"
-          ],
+          "tool_calls": ["score_lead"],
           "cache_read_tokens": 2251,
           "cache_write_tokens": 0
         },
@@ -604,20 +578,12 @@
           "timeline": "",
           "need": "",
           "authority": "",
-          "missing": [
-            "budget",
-            "timeline",
-            "need",
-            "authority",
-            "company"
-          ],
+          "missing": ["budget", "timeline", "need", "authority", "company"],
           "language": "en"
         },
         "output": {
           "error": "Invalid input",
-          "issues": [
-            "score: Invalid input: expected number, received undefined"
-          ]
+          "issues": ["score: Invalid input: expected number, received undefined"]
         },
         "text": null,
         "inputTokens": 0,
@@ -639,9 +605,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "score_lead"
-          ],
+          "tool_calls": ["score_lead"],
           "cache_read_tokens": 2976,
           "cache_write_tokens": 0
         },
@@ -667,13 +631,7 @@
           "timeline": null,
           "need": null,
           "authority": null,
-          "missing": [
-            "budget",
-            "timeline",
-            "need",
-            "authority",
-            "company"
-          ],
+          "missing": ["budget", "timeline", "need", "authority", "company"],
           "language": "en"
         },
         "output": {
@@ -703,9 +661,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "ask_followup_question"
-          ],
+          "tool_calls": ["ask_followup_question"],
           "cache_read_tokens": 3254,
           "cache_write_tokens": 0
         },
@@ -726,26 +682,14 @@
         "input": {
           "subject": "Quick questions about your automation project",
           "body": "Hi Tom,\n\nThanks for reaching out. To help you get the most from our AI agent solutions, I'd just like to gather a few details:\n\n1. What's your approximate budget range for an implementation project?\n2. Are you looking to start within the next 3 months?\n3. Is there a specific repetitive process you'd like to automate (e.g., lead handling, intake, support triage)?\n4. Approximately how many employees does your company have?\n5. Are you involved in these decisions yourself, or should I speak with someone else?\n\nLooking forward to your reply!\n\nBest regards,\nNorthwind Automation",
-          "missing_fields": [
-            "budget",
-            "timeline",
-            "need",
-            "authority",
-            "company"
-          ]
+          "missing_fields": ["budget", "timeline", "need", "authority", "company"]
         },
         "output": {
           "status": "sent",
           "emailId": "em_u489tqf4222ydm4f",
           "messageId": "<em_f2w444xpw05jf49n@leadpilot.local>",
           "provider": "console",
-          "asked_for": [
-            "budget",
-            "timeline",
-            "need",
-            "authority",
-            "company"
-          ],
+          "asked_for": ["budget", "timeline", "need", "authority", "company"],
           "lead_status": "needs_info"
         },
         "text": null,
@@ -768,9 +712,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "upsert_crm_contact"
-          ],
+          "tool_calls": ["upsert_crm_contact"],
           "cache_read_tokens": 3573,
           "cache_write_tokens": 0
         },
@@ -889,9 +831,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "get_lead"
-          ],
+          "tool_calls": ["get_lead"],
           "cache_read_tokens": 2251,
           "cache_write_tokens": 0
         },
@@ -920,9 +860,7 @@
           "source": "simulated",
           "status": "new",
           "score": null,
-          "risk_flags": [
-            "prompt_injection"
-          ],
+          "risk_flags": ["prompt_injection"],
           "received_at": "2026-09-24T19:05:21.941Z",
           "existing_booking": null,
           "emails_sent": 0,
@@ -956,9 +894,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "score_lead"
-          ],
+          "tool_calls": ["score_lead"],
           "cache_read_tokens": 3067,
           "cache_write_tokens": 0
         },
@@ -1014,9 +950,7 @@
         "output": {
           "stop_reason": "tool_use",
           "model": "qwen3.5:9b",
-          "tool_calls": [
-            "mark_disqualified"
-          ],
+          "tool_calls": ["mark_disqualified"],
           "cache_read_tokens": 3330,
           "cache_write_tokens": 0
         },

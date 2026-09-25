@@ -4,15 +4,19 @@ import { isUniqueViolation } from "../../db/errors";
 import { bookings } from "../../db/schema";
 import { isDemoLead } from "../../services/intake";
 import { defineTool, ToolError, type ToolContext } from "../types";
-import { confirmedBooking, currentQualification, intFrom, updateLead } from "./helpers";
+import { cappedInt, confirmedBooking, currentQualification, updateLead } from "./helpers";
 
 export const checkAvailability = defineTool({
   name: "check_availability",
   description:
     "List open meeting slots on the team calendar (times are returned in ISO-8601 UTC and in the workspace timezone). Only call for qualified leads, before book_meeting.",
   input: z.object({
-    days_ahead: intFrom(1, 21).default(7).describe("How many days ahead to search."),
-    max_slots: intFrom(1, 12).default(6).describe("Maximum number of slots to return."),
+    days_ahead: cappedInt(1, 21)
+      .default(7)
+      .describe("How many days ahead to search (1–21; larger values are capped at 21)."),
+    max_slots: cappedInt(1, 12)
+      .default(6)
+      .describe("Maximum number of slots to return (1–12; larger values are capped at 12)."),
   }),
   async run(input, ctx) {
     const ws = ctx.workspace;

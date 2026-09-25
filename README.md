@@ -217,25 +217,49 @@ The README block below and `evals/results/latest.*` are only written once all 30
 
 **29/30 correct (96.7%)** · model `qwen3.5:9b` via OpenAI-compatible · qwen3.5:9b (local, localhost:11434) · 2026-09-24 · commit `8130f66`
 
-| Metric | Value |
-| --- | --- |
-| Qualification accuracy | 96.7% (29/30) |
-| Safety checks (injection blocked / look-alikes not flagged) | 5/5 |
-| Avg cost per lead (local model — nothing billed) | $0.0000 |
-| Avg latency per lead | 5.8s (p50 6.1s, p95 9.3s) |
-| Total eval cost (local model — nothing billed) | $0.0000 |
-| Runs failed / hit step limit | 0 |
+| Metric                                                      | Value                     |
+| ----------------------------------------------------------- | ------------------------- |
+| Qualification accuracy                                      | 96.7% (29/30)             |
+| Safety checks (injection blocked / look-alikes not flagged) | 5/5                       |
+| Avg cost per lead (local model — nothing billed)            | $0.0000                   |
+| Avg latency per lead                                        | 5.8s (p50 6.1s, p95 9.3s) |
+| Total eval cost (local model — nothing billed)              | $0.0000                   |
+| Runs failed / hit step limit                                | 0                         |
 
 Confusion matrix (rows = expected, columns = agent outcome):
 
 | expected \ predicted | qualified | needs_info | disqualified | no decision |
-| --- | --- | --- | --- | --- |
-| **qualified** | 12 | 0 | 0 | 0 |
-| **needs_info** | 1 | 5 | 0 | 0 |
-| **disqualified** | 0 | 0 | 12 | 0 |
+| -------------------- | --------- | ---------- | ------------ | ----------- |
+| **qualified**        | 12        | 0          | 0            | 0           |
+| **needs_info**       | 1         | 5          | 0            | 0           |
+| **disqualified**     | 0         | 0          | 12           | 0           |
 
 Full per-case results: [evals/results/latest.md](evals/results/latest.md)
 <!-- EVAL:END -->
+
+### Stability across repeated runs
+
+Models aren't deterministic, so one run can be lucky. `pnpm eval --runs 3` runs the whole set three
+times and lists every case the model decided differently.
+
+<!-- EVAL-STABILITY:START -->
+
+> **TODO:** not measured yet — run `pnpm eval --runs 3`.
+
+<!-- EVAL-STABILITY:END -->
+
+### Conversation scenarios
+
+`pnpm eval:scenarios` tests multi-step behaviour with the real model, each scenario three times:
+a follow-up question, the lead’s email reply, and what the agent does next (book, decline, or refuse
+a hijack attempt hidden in the reply); approval mode holding actions until an admin approves; and a
+re-run that must not double-book or re-send.
+
+<!-- SCENARIOS:START -->
+
+> **TODO:** not measured yet — run `pnpm eval:scenarios`.
+
+<!-- SCENARIOS:END -->
 
 ## Use cases
 
@@ -271,6 +295,7 @@ rule-based stand-in — its runs are labeled `dev-fake-llm` and say nothing abou
 | `pnpm agent:run <leadId>` · `--seed <n>` · `--list` | Run the agent on one lead and print a live step-by-step trace in the terminal                                                                                      |
 | `pnpm eval` · `--resume` · `--fresh`                | Labeled eval: accuracy, confusion matrix, safety checks, cost & latency; resumable after quota stops (`--dry` tests the pipeline without a key and writes nothing) |
 | `pnpm demo:record <seed...>`                        | Record real runs for the public demo’s replay mode (`demo/recordings.json`)                                                                                        |
+| `pnpm eval --runs 3` · `pnpm eval:scenarios`        | Stability of decisions across repeated runs · multi-step conversation scenarios with the real model                                                                |
 | `pnpm google:auth`                                  | One-time Google OAuth flow that prints `GOOGLE_REFRESH_TOKEN`                                                                                                      |
 | `pnpm test`                                         | Vitest: unit + integration tests on in-memory Postgres, fake-LLM agent-loop tests, adapter contract tests with mocked `fetch`                                      |
 | `pnpm typecheck` / `lint` / `format`                | Quality gates                                                                                                                                                      |

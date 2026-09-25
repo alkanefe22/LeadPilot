@@ -21,7 +21,8 @@
     "eval": "tsx --conditions=react-server evals/run.ts",
     "db:local": "pglite-server --db=./.pglite --port=5433 --max-connections=32",
     "google:auth": "tsx scripts/google-auth.ts",
-    "demo:record": "tsx --conditions=react-server scripts/demo-record.ts"
+    "demo:record": "tsx --conditions=react-server scripts/demo-record.ts",
+    "eval:scenarios": "tsx --conditions=react-server evals/scenarios.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

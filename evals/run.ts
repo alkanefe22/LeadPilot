@@ -4,6 +4,7 @@
  *   pnpm eval                 full run, writes evals/results/latest.{md,json} and updates README
  *   pnpm eval --resume        continue from evals/results/partial.json (e.g. after a quota stop)
  *   pnpm eval --fresh         discard partial.json and start over
+ *   pnpm eval --runs 3        whole set 3×: accuracy per run + cases decided inconsistently
  *   pnpm eval --limit 5       first N cases only (does not touch README / latest.*)
  *   pnpm eval --only seed-16  comma-separated case ids (does not touch README / latest.*)
  *   pnpm eval --dry           pipeline check with DEV_FAKE_LLM; prints only, writes nothing
@@ -18,13 +19,8 @@
  * case is done. Each case records the provider and exact model(s) that served it.
  */
 import "../scripts/load-env";
-import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { PGlite } from "@electric-sql/pglite";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
 import { env, isLlmConfigured, llmLabel } from "../src/lib/env";
 import { MockCalendarAdapter } from "../src/server/adapters/calendar/mock";
 import { ProviderError } from "../src/server/adapters/http";
@@ -33,13 +29,13 @@ import { ConsoleEmailAdapter } from "../src/server/adapters/email/console";
 import { runAgent } from "../src/server/agent/loop";
 import { setDb, type Database } from "../src/server/db/client";
 import * as schema from "../src/server/db/schema";
-import { ensureDefaultWorkspace } from "../src/server/db/seed-lib";
 import { getLlm } from "../src/server/llm/anthropic";
 import { DevFakeLlm } from "../src/server/llm/fake";
 import { ThrottledLlm } from "../src/server/llm/throttle";
 import type { LlmClient, LlmRequest, LlmResponse } from "../src/server/llm/types";
 import { createInboundLead } from "../src/server/services/intake";
 import { EVAL_CASES, type EvalCase, type Expected } from "./dataset";
+import { freshDb, gitCommit, replaceReadmeBlock } from "./harness";
 
 type Predicted = Expected | "no_decision";
 
@@ -86,6 +82,8 @@ const only = value("only")?.split(",");
 const concurrency = Number(value("concurrency") ?? env().EVAL_CONCURRENCY);
 const callDelayMs = Number(value("delay") ?? env().EVAL_CALL_DELAY_MS);
 const subset = Boolean(limit || only);
+/** --runs N: repeat the whole set N times to measure how stable the model's decisions are. */
+const repeat = Number(value("runs") ?? 1);
 const resume = flag("resume");
 const fresh = flag("fresh");
 const PARTIAL_FILE = "evals/results/partial.json";
@@ -149,14 +147,6 @@ const bucket = (status: string): Predicted =>
       : status === "disqualified"
         ? "disqualified"
         : "no_decision";
-
-async function freshDb(): Promise<Database> {
-  const client = new PGlite();
-  const db = drizzle(client, { schema }) as unknown as Database;
-  await migrate(drizzle(client), { migrationsFolder: path.resolve("src/server/db/migrations") });
-  await ensureDefaultWorkspace(db, "whsec_eval");
-  return db;
-}
 
 async function runCase(
   db: Database,
@@ -374,18 +364,95 @@ Costs are estimates from token usage and the model price table (src/server/llm/p
 }
 
 function updateReadme(summary: string) {
-  const file = "README.md";
-  const readme = readFileSync(file, "utf8");
-  const start = "<!-- EVAL:START -->";
-  const end = "<!-- EVAL:END -->";
-  const a = readme.indexOf(start);
-  const b = readme.indexOf(end);
-  if (a < 0 || b < 0) {
-    console.warn("README markers not found — skipping README update.");
+  replaceReadmeBlock(
+    "EVAL",
+    `${summary}\n\nFull per-case results: [evals/results/latest.md](evals/results/latest.md)\n`,
+  );
+}
+
+/**
+ * --runs N: the whole set N times (fresh DB each time). Reports accuracy per run and which
+ * cases the model decides differently between runs. Writes stability.{md,json} + a README block;
+ * never touches latest.* (that stays the canonical single run).
+ */
+async function runRepeated(cases: EvalCase[]) {
+  const base = getLlm({ geminiRetries: 4, geminiMaxRetryDelayMs: 60_000 });
+  const detector = new OutageDetector(base);
+  const llm = new ThrottledLlm(detector, callDelayMs);
+  const provider = llmLabel();
+  const commit = gitCommit();
+  console.log(`Running ${cases.length} cases × ${repeat} runs with ${provider}…\n`);
+  const perRun: CaseResult[][] = [];
+  for (let r = 1; r <= repeat && !detector.outage; r++) {
+    const db = await freshDb();
+    setDb(db);
+    const results: CaseResult[] = [];
+    await pool(
+      cases,
+      concurrency,
+      (c) => runCase(db, llm, c, { provider, commit }),
+      (res) => {
+        if (detector.outage && res.runStatus === "failed") return;
+        results.push(res);
+      },
+      () => detector.outage !== null,
+    );
+    if (detector.outage) break;
+    perRun.push(results);
+    const ok = results.filter((x) => x.correct).length;
+    console.log(`run ${r}/${repeat}: ${ok}/${results.length} correct`);
+  }
+  if (detector.outage || perRun.length < repeat) {
+    console.error(`\n■ Stopped: ${detector.outage?.message ?? "incomplete"} — nothing written.`);
+    process.exitCode = 2;
     return;
   }
-  const block = `${start}\n<!-- Generated by \`pnpm eval\` — do not edit by hand. -->\n\n${summary}\n\nFull per-case results: [evals/results/latest.md](evals/results/latest.md)\n${end}`;
-  writeFileSync(file, readme.slice(0, a) + block + readme.slice(b + end.length));
+
+  const accuracies = perRun.map((rs) => rs.filter((x) => x.correct).length);
+  const unstable = cases
+    .map((c) => {
+      const rs = perRun.map((run) => run.find((x) => x.id === c.id)!);
+      const correct = rs.filter((x) => x.correct).length;
+      const outcomes = [...new Set(rs.map((x) => x.finalStatus))].join(" / ");
+      return { c, correct, outcomes };
+    })
+    .filter((x) => x.correct < repeat);
+  const safety = perRun.flat().filter((x) => x.safetyPass !== null);
+  const lat = perRun.flat().map((x) => x.latencyMs);
+  const total = cases.length * repeat;
+  const correctTotal = accuracies.reduce((a, b) => a + b, 0);
+  const alwaysRight = cases.length - unstable.length;
+  const summary = `**${correctTotal}/${total} decisions correct over ${repeat} runs (${pct(correctTotal, total)})** · per run: ${accuracies.map((a) => `${a}/${cases.length}`).join(", ")} · ${describeModels(perRun.flat())} · ${new Date().toISOString().slice(0, 10)} · commit \`${commit}\`
+
+| Metric | Value |
+| --- | --- |
+| Cases right in every run | ${alwaysRight}/${cases.length} |
+| Safety checks, all runs | ${safety.filter((x) => x.safetyPass).length}/${safety.length} |
+| Avg latency per lead | ${sec(lat.reduce((a, b) => a + b, 0) / Math.max(1, lat.length))} (p95 ${sec(quantile(lat, 0.95))}) |
+
+${
+  unstable.length
+    ? `Cases the model got wrong at least once:\n\n| Case | Expected | Right | Outcomes seen | Note |\n| --- | --- | --- | --- | --- |\n${unstable.map((u) => `| ${u.c.id} | ${u.c.expected} | ${u.correct}/${repeat} | ${u.outcomes} | ${u.c.note} |`).join("\n")}`
+    : "Every case was decided correctly in every run."
+}`;
+  console.log(`\n${summary}`);
+  if (dry || subset) {
+    console.log("\n(subset or dry run: results not written)");
+    return;
+  }
+  mkdirSync("evals/results", { recursive: true });
+  writeFileSync(
+    "evals/results/stability.md",
+    `# LeadPilot eval — stability over ${repeat} runs\n\n${summary}\n\nGenerated by \`pnpm eval --runs ${repeat}\`.\n`,
+  );
+  writeFileSync(
+    "evals/results/stability.json",
+    JSON.stringify({ date: new Date().toISOString(), runs: perRun }, null, 2),
+  );
+  replaceReadmeBlock("EVAL-STABILITY", summary);
+  console.log(
+    "\n✔ Wrote evals/results/stability.{md,json} and updated the README stability section.",
+  );
 }
 
 async function main() {
@@ -404,6 +471,7 @@ async function main() {
   let cases = EVAL_CASES;
   if (only) cases = cases.filter((c) => only.includes(c.id));
   if (limit) cases = cases.slice(0, limit);
+  if (repeat > 1) return runRepeated(cases);
 
   // Full runs are resumable; subsets (--only/--limit) and dry runs never touch partial.json.
   const resumable = !dry && !subset;
@@ -435,12 +503,7 @@ async function main() {
   const detector = new OutageDetector(base);
   const llm = new ThrottledLlm(detector, callDelayMs);
   const provider = dry ? "dev fake LLM (dry run)" : llmLabel();
-  let commit = "unknown";
-  try {
-    commit = execSync("git rev-parse --short HEAD").toString().trim();
-  } catch {
-    // not a git checkout
-  }
+  const commit = gitCommit();
   const earlier = [...new Set(done.map((r) => r.provider))].filter((p) => p !== provider);
   if (earlier.length) {
     console.warn(
