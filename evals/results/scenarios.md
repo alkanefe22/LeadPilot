@@ -1,11 +1,11 @@
 # LeadPilot scenario tests — latest run
 
-**17/18 scenario runs passed** · 6 scenarios × 3 · model via OpenAI-compatible · qwen3.5:9b (local, localhost:11434) · 2026-09-25 · commit `09f56e3`
+**17/18 scenario runs passed** · 6 scenarios × 3 · model via OpenAI-compatible · qwen3.5:9b (local, localhost:11434) · 2026-09-25 · commit `65db340`
 
 | Scenario | Passed | Failed checks |
 | --- | --- | --- |
-| ⚠️ Missing info → follow-up → lead replies with budget & timeline → booked | 2/3 | booked after the reply (1×); exactly one booking (1×); confirmation email sent (1×) |
-| ✅ Turkish lead → follow-up in Turkish → reply with budget → booked, confirmation in Turkish | 3/3 | — |
+| ✅ Missing info → follow-up → lead replies with budget & timeline → booked | 3/3 | — |
+| ⚠️ Turkish lead → follow-up in Turkish → reply with budget → booked, confirmation in Turkish | 2/3 | booked after the reply (1×) |
 | ✅ Follow-up → lead replies with a tiny budget → politely declined, no booking | 3/3 | — |
 | ✅ Approval required → actions are held; approving the booking executes it | 3/3 | — |
 | ✅ Booked lead re-run → no second booking, no second confirmation | 3/3 | — |

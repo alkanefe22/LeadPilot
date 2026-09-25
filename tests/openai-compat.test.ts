@@ -130,7 +130,8 @@ describe("OpenAI-compatible client in the agent loop (fake responses)", () => {
 
     const steps = await db.select().from(agentSteps).where(eq(agentSteps.runId, out.runId));
     const llmSteps = steps.filter((s) => s.type === "llm");
-    expect(llmSteps).toHaveLength(3);
+    // 3 scripted turns + 1 after the nudge (the scripted run never finishes the procedure).
+    expect(llmSteps).toHaveLength(4);
     expect(llmSteps[0]).toMatchObject({ inputTokens: 900, outputTokens: 60, costUsd: 0 });
     expect(llmSteps[0]!.latencyMs).toBeGreaterThanOrEqual(0);
     const [row] = await db.select().from(agentRuns).where(eq(agentRuns.id, out.runId));

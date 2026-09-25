@@ -105,25 +105,17 @@ export function isWorkComplete(state: RunState): boolean {
   return terminal && crm && !state.lastTurnHadErrors;
 }
 
-/** Tools that record a decision about the lead (reading it or updating the CRM does not). */
-const DECISION_TOOLS = new Set([
-  "score_lead",
-  "mark_disqualified",
-  "ask_followup_question",
-  "book_meeting",
-  "send_email",
-]);
-
 export const NUDGE =
-  "You ended your turn without recording any decision about this lead. Plain text does nothing here — only tool calls act. Continue the procedure now by calling the appropriate tools (start with score_lead, using the latest information).";
+  "You ended your turn before finishing the procedure for this lead (a final action — booking plus confirmation email, a follow-up question, or disqualification — and the CRM update). Plain text does nothing here; only tool calls act. Continue now by calling the remaining tools, using the latest information.";
 
 /**
- * On a new lead or a reply, a run that ends before any decision tool succeeded gets one
- * reminder to continue. Never on re-runs or approvals, where doing nothing can be correct.
+ * On a new lead or a reply, a run that ends before the procedure reached an end state gets one
+ * reminder to continue (small models often announce the next step and stop). Never on re-runs
+ * or approvals, where doing nothing can be correct.
  */
 export function shouldNudge(trigger: RunTrigger, state: RunState, nudges: number): boolean {
   if (nudges >= 1 || trigger === "rerun" || trigger === "approval") return false;
-  return !(state.completedTools ?? []).some((t) => DECISION_TOOLS.has(t));
+  return !isWorkComplete(state);
 }
 
 /**

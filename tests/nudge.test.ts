@@ -41,7 +41,7 @@ describe("continuation nudge (model stops before deciding)", () => {
     expect(out.status).toBe("completed");
   });
 
-  it("never nudges re-runs or approvals, or runs that already decided something", () => {
+  it("nudges unfinished runs on new leads and replies only — never re-runs, approvals, or finished work", () => {
     const base = { qualification: null, approvalsQueued: 0, outwardActions: [] };
     const none = { ...base, completedTools: ["get_lead"] };
     expect(shouldNudge("inbound", none, 0)).toBe(true);
@@ -49,7 +49,10 @@ describe("continuation nudge (model stops before deciding)", () => {
     expect(shouldNudge("rerun", none, 0)).toBe(false);
     expect(shouldNudge("approval", none, 0)).toBe(false);
     expect(shouldNudge("inbound", none, 1)).toBe(false);
-    expect(shouldNudge("inbound", { ...base, completedTools: ["score_lead"] }, 0)).toBe(false);
+    // Scored and announced the next step, but stopped: still unfinished.
+    expect(shouldNudge("inbound", { ...base, completedTools: ["score_lead"] }, 0)).toBe(true);
+    const done = ["score_lead", "ask_followup_question", "upsert_crm_contact"];
+    expect(shouldNudge("inbound", { ...base, completedTools: done }, 0)).toBe(false);
   });
 
   it("a re-run that just ends is left alone", async () => {

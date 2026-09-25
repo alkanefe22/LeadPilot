@@ -59,6 +59,8 @@ beforeAll(async () => {
     trigger: "simulate",
     llm: new FakeLlm([
       { tools: [{ name: "score_lead", input: GOOD_SCORE }] },
+      { text: "Qualified.", stop: "end_turn" },
+      // after the continuation nudge (the scripted run stops early on purpose)
       { text: "Scored and qualified.", stop: "end_turn" },
     ]),
     adapters: testAdapters(),

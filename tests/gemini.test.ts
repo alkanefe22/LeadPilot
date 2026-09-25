@@ -139,7 +139,8 @@ describe("GeminiClient in the agent loop (fake responses)", () => {
     // Trace: tokens per step like Anthropic (1000 uncached + 200 cached in; 80 + 40 thinking out).
     const steps = await db.select().from(agentSteps).where(eq(agentSteps.runId, out.runId));
     const llmSteps = steps.filter((s) => s.type === "llm");
-    expect(llmSteps).toHaveLength(3);
+    // 3 scripted turns + 1 after the nudge (the scripted run never finishes the procedure).
+    expect(llmSteps).toHaveLength(4);
     expect(llmSteps[0]).toMatchObject({ inputTokens: 1200, outputTokens: 120 });
     expect(llmSteps[0]!.latencyMs).toBeGreaterThanOrEqual(0);
     expect(steps.filter((s) => s.type === "tool").map((s) => s.toolName)).toEqual([
@@ -387,8 +388,13 @@ describe("fallback models on 503", () => {
     const llm = new GeminiClient(PRIMARY, "k", { fallbackModels: [FALLBACK], maxRetryDelayMs: 0 });
     const out = await run(llm, (await createLead(db)).id);
     expect(out.status).toBe("completed");
-    // The 503 is not retried on the primary.
-    expect(f.calls.map((c) => c.url)).toEqual([url(PRIMARY), url(FALLBACK), url(PRIMARY)]);
+    // The 503 is not retried on the primary (the last call is the one after the nudge).
+    expect(f.calls.map((c) => c.url)).toEqual([
+      url(PRIMARY),
+      url(FALLBACK),
+      url(PRIMARY),
+      url(PRIMARY),
+    ]);
 
     const steps = await db.select().from(agentSteps).where(eq(agentSteps.runId, out.runId));
     const llmSteps = steps.filter((s) => s.type === "llm");
