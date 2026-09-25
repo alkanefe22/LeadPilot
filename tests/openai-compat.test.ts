@@ -202,8 +202,9 @@ describe("OpenAI-compatible client in the agent loop (fake responses)", () => {
     const body = f.bodyOf(0) as Body;
     expect(body.max_completion_tokens).toBeGreaterThan(0);
     expect(body.max_tokens).toBeUndefined();
-    // 900 in × $1/M + 60 out × $2/M
-    expect(out.costUsd).toBeCloseTo(0.00102, 6);
+    // Text-only answer + the one nudge = 2 calls, each 900 in × $1/M + 60 out × $2/M.
+    expect(f.calls).toHaveLength(2);
+    expect(out.costUsd).toBeCloseTo(0.00204, 6);
   });
 
   it("surfaces server errors in the trace and marks the provider failing", async () => {

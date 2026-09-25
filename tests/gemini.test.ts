@@ -224,7 +224,8 @@ describe("rate limits (429)", () => {
     const f = mockFetch(sequence(isGen, exhausted, () => reply([{ text: "ok" }])));
     const out = await run(client(), (await createLead(db)).id);
     expect(out.status).toBe("completed");
-    expect(f.calls).toHaveLength(2);
+    // 429 → retry → a text-only answer, which gets one nudge (no decision was recorded) → done.
+    expect(f.calls).toHaveLength(3);
   });
 
   it("fails the run with a clear error after the retries are exhausted and marks Gemini failing", async () => {
@@ -481,6 +482,12 @@ describe("daily quota (429 with a PerDay violation)", () => {
     const llm = new GeminiClient(PRIMARY, "k", { fallbackModels: [FALLBACK], maxRetryDelayMs: 0 });
     const out = await run(llm, (await createLead(db)).id);
     expect(out.status).toBe("completed");
-    expect(f.calls.map((c) => c.url)).toEqual([url(PRIMARY), url(FALLBACK)]);
+    // Text-only answer → one nudge; the primary is still out of quota, so both calls fall back.
+    expect(f.calls.map((c) => c.url)).toEqual([
+      url(PRIMARY),
+      url(FALLBACK),
+      url(PRIMARY),
+      url(FALLBACK),
+    ]);
   });
 });
