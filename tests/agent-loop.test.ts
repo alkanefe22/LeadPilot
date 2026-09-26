@@ -229,8 +229,8 @@ describe("agent loop (mocked LLM)", () => {
 
       const steps = await db.select().from(agentSteps).where(eq(agentSteps.runId, out.runId));
       expect(steps.find((s) => s.toolName === "book_meeting")?.status).toBe("error");
-      // Emails to flagged leads always wait for a human.
-      expect(steps.find((s) => s.toolName === "send_email")?.status).toBe("pending_approval");
+      // A "confirmation" without a booking is refused outright (it would otherwise wait for a human).
+      expect(steps.find((s) => s.toolName === "send_email")?.status).toBe("error");
       // The model was told why.
       expect(JSON.stringify(steps.find((s) => s.toolName === "score_lead")!.output)).toContain(
         "policy_note",
