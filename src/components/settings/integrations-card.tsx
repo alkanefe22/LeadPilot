@@ -137,7 +137,7 @@ export function IntegrationsCard({
   isAdmin,
 }: {
   integrations: IntegrationView[];
-  llm: { label: string; ok: boolean; error?: string | null };
+  llm: { label: string; ok: boolean; error?: string | null; badge?: string; note?: string };
   isAdmin: boolean;
 }) {
   return (
@@ -162,9 +162,10 @@ export function IntegrationsCard({
                   : BADGE.unknown.className,
             )}
           >
-            {llm.error ? "Error" : llm.ok ? "Configured" : "Missing"}
+            {llm.error ? "Error" : (llm.badge ?? (llm.ok ? "Configured" : "Missing"))}
           </span>
         </div>
+        {llm.note ? <p className="-mt-2 mb-3 text-xs text-muted-foreground">{llm.note}</p> : null}
         {llm.error ? (
           <p
             role="alert"

@@ -5,10 +5,11 @@ import { PageHeader } from "@/components/layout/page-header";
 import { IntegrationsCard } from "@/components/settings/integrations-card";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { env, isLlmConfigured, llmLabel } from "@/lib/env";
+import { demoMode, env, isLlmConfigured, llmLabel } from "@/lib/env";
 import { formatUsd } from "@/lib/format";
 import { getViewer } from "@/server/auth";
 import { getDb } from "@/server/db/client";
+import { loadRecordings } from "@/server/demo/recordings";
 import { getDemoBudget } from "@/server/services/demo-budget";
 import { getIntegrations, getLlmHealth } from "@/server/services/integrations";
 import { currentWorkspaceId, getWorkspace } from "@/server/workspace";
@@ -29,6 +30,18 @@ export default async function SettingsPage() {
   });
   const model = llmLabel(e);
   const llmHealth = await getLlmHealth();
+  // A public demo in replay mode needs no model at all: say so instead of showing "Missing".
+  const replay = e.PUBLIC_DEMO && demoMode(e) === "replay";
+  const recordedModels = [...new Set(loadRecordings().map((r) => r.run.model))];
+  const llm =
+    replay && !isLlmConfigured(e)
+      ? {
+          label: `replay of recorded runs${recordedModels.length ? ` (${recordedModels.join(", ")})` : ""}`,
+          ok: true,
+          badge: "Replay",
+          note: "Public visitors watch recorded real runs, so no model is called on this deployment.",
+        }
+      : { label: model, ok: isLlmConfigured(e), error: llmHealth };
 
   return (
     <>
@@ -51,15 +64,15 @@ export default async function SettingsPage() {
           }}
         />
         <aside className="space-y-4">
-          <IntegrationsCard
-            integrations={integrations}
-            llm={{ label: model, ok: isLlmConfigured(e), error: llmHealth }}
-            isAdmin={viewer.isAdmin}
-          />
+          <IntegrationsCard integrations={integrations} llm={llm} isAdmin={viewer.isAdmin} />
           <Card size="sm">
             <CardHeader>
               <CardTitle>Public demo budget</CardTitle>
-              <CardDescription>Simulated runs by visitors, resets 00:00 UTC.</CardDescription>
+              <CardDescription>
+                {replay
+                  ? "Replay mode: visitors watch recorded runs, which cost nothing. This budget only applies to live runs (DEMO_MODE=live)."
+                  : "Simulated runs by visitors, resets 00:00 UTC."}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <Meter

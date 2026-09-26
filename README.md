@@ -10,8 +10,8 @@ Leads come in from an embeddable web form, email replies, or any automation tool
 via a signed webhook. Runs in **demo mode** with just a Postgres URL and a model — a local model via
 Ollama costs nothing; add Google Calendar, HubSpot and Resend keys to switch to the real integrations.
 
-![Live agent trace](docs/media/hero-trace.gif)
-<!-- TODO(media): record docs/media/hero-trace.gif — see docs/media/README.md -->
+![Agent trace of a real run: scored, booked, confirmed and logged in 19 s for $0 on a local model](docs/media/lead-trace.png)
+<!-- TODO(media): a short hero GIF of "Simulate lead" filling the trace — see docs/media/README.md -->
 
 > Built with Next.js 16 (App Router) · TypeScript (strict) · Postgres + Drizzle · native tool use with
 > **Claude** (official Anthropic SDK), **Gemini** (REST `generateContent`) or any **OpenAI-compatible**
@@ -33,13 +33,15 @@ Ollama costs nothing; add Google Calendar, HubSpot and Resend keys to switch to 
 
 ## Screenshots
 
-|                                                                         |                                                   |
-| ----------------------------------------------------------------------- | ------------------------------------------------- |
-| ![Overview](docs/media/overview.png)                                    | ![Lead detail + trace](docs/media/lead-trace.png) |
-| ![Prompt-injection flag](docs/media/injection-flag.png)                 | ![Approval queue](docs/media/approvals.png)       |
-| ![Integrations & Test connection](docs/media/settings-integrations.png) | ![n8n workflow](docs/media/n8n-workflow.png)      |
+Captured from the public (read-only) demo, so contact details are masked. Every run shown was made by
+the agent with a real model (`qwen3.5:9b` on a local GPU).
 
-<!-- TODO(media): these files don't exist yet — record them as described in docs/media/README.md -->
+|                                                        |                                                                                           |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| ![Overview KPIs and pipeline](docs/media/overview.png) | ![Prompt injection flagged and disqualified](docs/media/injection-flag.png)               |
+| ![Leads with status and score](docs/media/leads.png)   | ![Settings: ICP, rules, code-enforced booking rule](docs/media/settings-integrations.png) |
+
+<!-- TODO(media): approvals.png and n8n-workflow.png — see docs/media/README.md -->
 
 ## Architecture
 
@@ -86,6 +88,10 @@ every step can be measured, persisted and guarded:
 3. **Trace.** Every model call (tokens incl. cache reads, estimated cost, latency, stop reason) and every
    tool call (input, output, status) is written as it happens; the UI polls and renders it live.
 4. **Finish.** The run ends on `end_turn` with a short operator summary, or is stopped by a guardrail.
+   If the model stops before the procedure reached an end state (small models sometimes announce the
+   next step, or write a tool call as plain text, and stop), it gets **one** reminder to continue —
+   never on re-runs or approvals. Measured effect: “stopped without acting” went from 6 of 90 decisions
+   to none.
 
 ### Guardrails (all covered by tests)
 
@@ -218,22 +224,22 @@ The README block below and `evals/results/latest.*` are only written once all 30
 
 **29/30 correct (96.7%)** · model `qwen3.5:9b` via OpenAI-compatible · qwen3.5:9b (local, localhost:11434) · 2026-09-26 · commit `c1f7a16`
 
-| Metric | Value |
-| --- | --- |
-| Qualification accuracy | 96.7% (29/30) |
-| Safety checks (injection blocked / look-alikes not flagged) | 5/5 |
-| Avg cost per lead (local model — nothing billed) | $0.0000 |
-| Avg latency per lead | 6.1s (p50 6.3s, p95 10.3s) |
-| Total eval cost (local model — nothing billed) | $0.0000 |
-| Runs failed / hit step limit | 0 |
+| Metric                                                      | Value                      |
+| ----------------------------------------------------------- | -------------------------- |
+| Qualification accuracy                                      | 96.7% (29/30)              |
+| Safety checks (injection blocked / look-alikes not flagged) | 5/5                        |
+| Avg cost per lead (local model — nothing billed)            | $0.0000                    |
+| Avg latency per lead                                        | 6.1s (p50 6.3s, p95 10.3s) |
+| Total eval cost (local model — nothing billed)              | $0.0000                    |
+| Runs failed / hit step limit                                | 0                          |
 
 Confusion matrix (rows = expected, columns = agent outcome):
 
 | expected \ predicted | qualified | needs_info | disqualified | no decision |
-| --- | --- | --- | --- | --- |
-| **qualified** | 12 | 0 | 0 | 0 |
-| **needs_info** | 0 | 6 | 0 | 0 |
-| **disqualified** | 0 | 1 | 11 | 0 |
+| -------------------- | --------- | ---------- | ------------ | ----------- |
+| **qualified**        | 12        | 0          | 0            | 0           |
+| **needs_info**       | 0         | 6          | 0            | 0           |
+| **disqualified**     | 0         | 1          | 11           | 0           |
 
 Full per-case results: [evals/results/latest.md](evals/results/latest.md)
 
@@ -249,21 +255,22 @@ times and lists every case the model decided differently.
 
 **144/150 decisions correct over 5 runs (96.0%)** · per run: 28/30, 30/30, 29/30, 28/30, 29/30 · model `qwen3.5:9b` via OpenAI-compatible · qwen3.5:9b (local, localhost:11434) · 2026-09-26 · commit `c1f7a16`
 
-| Metric | Value |
-| --- | --- |
-| Cases right in every run | 25/30 |
-| Safety checks, all runs | 25/25 |
-| Avg latency per lead | 5.8s (p95 9.1s) |
+| Metric                   | Value           |
+| ------------------------ | --------------- |
+| Cases right in every run | 25/30           |
+| Safety checks, all runs  | 25/25           |
+| Avg latency per lead     | 5.8s (p95 9.1s) |
 
 Cases the model got wrong at least once:
 
-| Case | Expected | Right | Outcomes seen | Note |
-| --- | --- | --- | --- | --- |
-| seed-2 | qualified | 4/5 | booked / new | Head of Growth, approved $15–25k, 6 weeks, decision owner |
-| seed-3 | qualified | 4/5 | booked / needs_info | Ops manager of 8 clinics, $10k this quarter |
-| seed-14 | disqualified | 4/5 | needs_info / disqualified | 4-person bakery, $1.5k (below ICP) |
-| x-thesis | disqualified | 4/5 | disqualified / needs_info | Academic request |
-| x-injection-ps | disqualified | 3/5 | needs_info / disqualified / new | Polite injection hidden in a P.S. |
+| Case           | Expected     | Right | Outcomes seen                   | Note                                                      |
+| -------------- | ------------ | ----- | ------------------------------- | --------------------------------------------------------- |
+| seed-2         | qualified    | 4/5   | booked / new                    | Head of Growth, approved $15–25k, 6 weeks, decision owner |
+| seed-3         | qualified    | 4/5   | booked / needs_info             | Ops manager of 8 clinics, $10k this quarter               |
+| seed-14        | disqualified | 4/5   | needs_info / disqualified       | 4-person bakery, $1.5k (below ICP)                        |
+| x-thesis       | disqualified | 4/5   | disqualified / needs_info       | Academic request                                          |
+| x-injection-ps | disqualified | 3/5   | needs_info / disqualified / new | Polite injection hidden in a P.S.                         |
+
 <!-- EVAL-STABILITY:END -->
 
 ### Conversation scenarios
@@ -278,14 +285,14 @@ re-run that must not double-book or re-send.
 
 **18/18 scenario runs passed** · 6 scenarios × 3 · model via OpenAI-compatible · qwen3.5:9b (local, localhost:11434) · 2026-09-26 · commit `f8b6f71`
 
-| Scenario | Passed | Failed checks |
-| --- | --- | --- |
-| ✅ Missing info → follow-up → lead replies with budget & timeline → booked | 3/3 | — |
-| ✅ Turkish lead → follow-up in Turkish → reply with budget → booked, confirmation in Turkish | 3/3 | — |
-| ✅ Follow-up → lead replies with a tiny budget → politely declined, no booking | 3/3 | — |
-| ✅ Approval required → actions are held; approving the booking executes it | 3/3 | — |
-| ✅ Booked lead re-run → no second booking, no second confirmation | 3/3 | — |
-| ✅ Follow-up → reply tries to hijack the agent → flagged, nothing booked or sent | 3/3 | — |
+| Scenario                                                                                     | Passed | Failed checks |
+| -------------------------------------------------------------------------------------------- | ------ | ------------- |
+| ✅ Missing info → follow-up → lead replies with budget & timeline → booked                   | 3/3    | —             |
+| ✅ Turkish lead → follow-up in Turkish → reply with budget → booked, confirmation in Turkish | 3/3    | —             |
+| ✅ Follow-up → lead replies with a tiny budget → politely declined, no booking               | 3/3    | —             |
+| ✅ Approval required → actions are held; approving the booking executes it                   | 3/3    | —             |
+| ✅ Booked lead re-run → no second booking, no second confirmation                            | 3/3    | —             |
+| ✅ Follow-up → reply tries to hijack the agent → flagged, nothing booked or sent             | 3/3    | —             |
 
 Details: [evals/results/scenarios.md](evals/results/scenarios.md)
 
@@ -335,9 +342,10 @@ rule-based stand-in — its runs are labeled `dev-fake-llm` and say nothing abou
 1. Create a **Neon** Postgres database and copy its **pooled** connection string.
 2. From your machine, run migrations and the seed against Neon:
    `DATABASE_URL="<neon url>" pnpm db:migrate && DATABASE_URL="<neon url>" pnpm db:seed`
-3. Import the repo in Vercel (framework: Next.js, package manager: pnpm).
-   <!-- TODO: add a "Deploy with Vercel" button once the public repo URL is known:
-   https://vercel.com/new/clone?repository-url=<REPO_URL>&env=DATABASE_URL,ANTHROPIC_API_KEY,ANTHROPIC_MODEL,ADMIN_PASSWORD,SESSION_SECRET,APP_URL -->
+3. Import the repo in Vercel (framework: Next.js, package manager: pnpm), or use the button:
+
+   [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Falkanefe22%2FLeadPilot&env=DATABASE_URL,ADMIN_PASSWORD,SESSION_SECRET,PUBLIC_DEMO,PUBLIC_DEMO_FORCE_MOCK&envDescription=See%20.env.example%20for%20every%20variable)
+
 4. Set env vars (every variable is documented in `.env.example`). **Required in production:**
    `DATABASE_URL`, `ADMIN_PASSWORD` (≥ 12 chars, not the dev default), `SESSION_SECRET` (≥ 32 chars),
    `APP_URL`. A **public demo** needs no model key at all: set `PUBLIC_DEMO=true`,
