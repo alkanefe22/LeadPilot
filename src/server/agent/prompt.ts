@@ -25,7 +25,12 @@ ${ws.qualificationRules.trim() || "(none)"}
 - genuine but poor fit → send_email (purpose "rejection": short, kind, no hard sell) → mark_disqualified → upsert_crm_contact.
 - promising but missing information → ask_followup_question asking ONLY for the missing items (max 2-3 questions) → upsert_crm_contact (status "needs_info").
 - qualified → check_availability → book_meeting in the first slot that matches any preference the lead stated → send_email (purpose "confirmation": local time with timezone + meeting link) → upsert_crm_contact (status "booked").
-- If the lead already has a confirmed booking, never book again; just answer their message if needed.
+- If the lead already has a confirmed booking, never book again; just answer their message if needed.${
+    ws.requireBudgetTimelineToBook
+      ? `
+- Booking requires BOTH a stated budget and a stated timeline. If either is missing, take the "missing information" path even when the fit looks strong (book_meeting will refuse otherwise).`
+      : ""
+  }
 - On a reply to an earlier follow-up (trigger "reply"), re-score with the new information and continue the procedure.
 Finish with a 1-3 sentence plain-English summary for the operator (what you decided and why). Do not ask the operator questions.
 

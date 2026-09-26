@@ -44,6 +44,7 @@ export default async function SettingsPage() {
             qualificationRules: ws.qualificationRules,
             scoreThreshold: ws.scoreThreshold,
             requireApproval: ws.requireApproval,
+            requireBudgetTimelineToBook: ws.requireBudgetTimelineToBook,
             meetingDurationMin: ws.meetingDurationMin,
             timezone: ws.timezone,
             senderName: ws.senderName,

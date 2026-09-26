@@ -57,6 +57,13 @@
       "when": 1790272846598,
       "tag": "0007_run_time_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790416968271,
+      "tag": "0008_budget_timeline_rule",
+      "breakpoints": true
     }
   ]
 }

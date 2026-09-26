@@ -23,6 +23,15 @@ export async function confirmedBooking(db: Database, leadId: string) {
 
 export const isFlagged = (lead: Lead) => lead.riskFlags.includes(RISK_PROMPT_INJECTION);
 
+const UNKNOWN =
+  /^(n\/?a|none|null|unknown|unclear|tbd|tbc|-+|\?+|not (specified|mentioned|provided|stated|given|known|disclosed)|no (budget|timeline)( (given|mentioned|stated|specified))?)\.?$/i;
+
+/** A qualification field the lead actually stated (models write "not specified" instead of null). */
+export function isKnown(value: string | null | undefined): boolean {
+  const v = value?.trim() ?? "";
+  return v.length > 0 && !UNKNOWN.test(v);
+}
+
 /** The qualification this run produced, or the one stored from a previous run. */
 export function currentQualification(ctx: ToolContext): Qualification | null {
   return ctx.state.qualification ?? ctx.lead.qualification ?? null;

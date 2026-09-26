@@ -1,0 +1,1 @@
+ALTER TABLE "workspaces" ADD COLUMN "require_budget_timeline_to_book" boolean DEFAULT true NOT NULL;

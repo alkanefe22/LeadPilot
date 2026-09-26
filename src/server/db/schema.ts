@@ -79,6 +79,8 @@ export const workspaces = pgTable("workspaces", {
   qualificationRules: text("qualification_rules").notNull().default(""),
   scoreThreshold: integer("score_threshold").notNull().default(70),
   requireApproval: boolean("require_approval").notNull().default(false),
+  // Hard rule, enforced in code: book_meeting is refused until budget AND timeline are known.
+  requireBudgetTimelineToBook: boolean("require_budget_timeline_to_book").notNull().default(true),
   webhookSecret: text("webhook_secret").notNull(),
   timezone: text("timezone").notNull().default("UTC"),
   meetingDurationMin: integer("meeting_duration_min").notNull().default(30),

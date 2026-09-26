@@ -15,6 +15,7 @@ const settingsSchema = z.object({
   qualificationRules: z.string().max(8000),
   scoreThreshold: z.coerce.number().int().min(1).max(100),
   requireApproval: z.boolean(),
+  requireBudgetTimelineToBook: z.boolean(),
   meetingDurationMin: z.coerce
     .number()
     .int()
@@ -44,6 +45,7 @@ export async function saveSettings(input: SettingsInput): Promise<SaveResult> {
       qualificationRules: sanitizeText(d.qualificationRules, 8000),
       scoreThreshold: d.scoreThreshold,
       requireApproval: d.requireApproval,
+      requireBudgetTimelineToBook: d.requireBudgetTimelineToBook,
       meetingDurationMin: d.meetingDurationMin,
       timezone: d.timezone,
       senderName: sanitizeLine(d.senderName, 80) ?? "LeadPilot",

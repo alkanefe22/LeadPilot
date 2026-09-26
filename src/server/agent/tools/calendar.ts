@@ -4,7 +4,7 @@ import { isUniqueViolation } from "../../db/errors";
 import { bookings } from "../../db/schema";
 import { isDemoLead } from "../../services/intake";
 import { defineTool, ToolError, type ToolContext } from "../types";
-import { cappedInt, confirmedBooking, currentQualification, updateLead } from "./helpers";
+import { cappedInt, confirmedBooking, currentQualification, isKnown, updateLead } from "./helpers";
 
 export const checkAvailability = defineTool({
   name: "check_availability",
@@ -52,6 +52,18 @@ async function bookingPrecheck(ctx: ToolContext) {
     throw new ToolError(
       `Policy: only qualified leads can be booked (score ${q.score} < threshold ${ctx.workspace.scoreThreshold} or category "${q.category}").`,
     );
+  }
+  if (ctx.workspace.requireBudgetTimelineToBook) {
+    const missing = [
+      isKnown(q.budget) ? null : "budget",
+      isKnown(q.timeline) ? null : "timeline",
+    ].filter(Boolean);
+    if (missing.length) {
+      throw new ToolError(
+        `Policy: budget and timeline must be known before booking (missing: ${missing.join(", ")}). Do not book — ask for the missing items with ask_followup_question instead.`,
+        { missing },
+      );
+    }
   }
 }
 

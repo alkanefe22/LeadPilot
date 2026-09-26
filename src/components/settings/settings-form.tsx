@@ -107,6 +107,22 @@ export function SettingsForm({ initial, isAdmin }: { initial: SettingsInput; isA
             />
           </div>
 
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <Label htmlFor="budget-rule">Require budget and timeline before booking</Label>
+              <p className="text-xs text-muted-foreground">
+                Enforced in code, not left to the model: a meeting is only booked once the lead has
+                stated both; otherwise the agent asks a follow-up.
+              </p>
+            </div>
+            <Switch
+              id="budget-rule"
+              checked={v.requireBudgetTimelineToBook}
+              onCheckedChange={(c) => set("requireBudgetTimelineToBook", c)}
+              disabled={!isAdmin}
+            />
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="duration">Meeting length (min)</Label>
