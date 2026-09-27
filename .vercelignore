@@ -1,0 +1,13 @@
+# Never upload local secrets, databases or tooling (git-connected deploys only use
+# tracked files anyway; this also protects `vercel` CLI deploys).
+.env*
+!.env.example
+.pglite/
+.claude/
+AGENTS.md
+CLAUDE.md
+.next/
+node_modules/
+coverage/
+*.tsbuildinfo
+evals/results/partial.json
