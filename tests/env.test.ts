@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { parseEnv } from "@/lib/env";
 
 describe("env", () => {
-  it("boots with only DATABASE_URL and applies demo-friendly defaults", () => {
+  it("boots with only DATABASE_URL and applies safe defaults (private dashboard)", () => {
     const e = parseEnv({ DATABASE_URL: "postgres://x" });
-    expect(e.PUBLIC_DEMO).toBe(true);
+    expect(e.PUBLIC_DEMO).toBe(false);
     expect(e.MAX_AGENT_STEPS).toBe(12);
     expect(e.CALENDAR_ADAPTER).toBe("auto");
     expect(e.APP_URL).toBe("http://localhost:3000");

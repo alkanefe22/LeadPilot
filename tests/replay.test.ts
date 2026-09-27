@@ -1,6 +1,6 @@
 import { count } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { demoMode, parseEnv, resetEnvCache } from "@/lib/env";
 import {
   NotReplayableError,
@@ -69,10 +69,17 @@ beforeAll(async () => {
   realRecording = await buildRecording(db, out.runId, { id: "seed-1", provider: "test" });
 });
 beforeEach(() => {
+  // These tests exercise a public demo deployment; PUBLIC_DEMO defaults to false.
+  vi.stubEnv("PUBLIC_DEMO", "true");
+  resetEnvCache();
   getLlm.mockClear();
   startAgentRun.mockClear();
   viewer.current = { isAdmin: false };
   recordings.list = [realRecording];
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetEnvCache();
 });
 
 const simulate = async () => {
@@ -83,7 +90,8 @@ const leadCount = async () => (await db.select({ n: count() }).from(leads))[0]!.
 
 describe("public demo replay mode", () => {
   it("defaults to replay when PUBLIC_DEMO=true, live otherwise, and DEMO_MODE overrides", () => {
-    expect(demoMode(parseEnv({ DATABASE_URL: "x" }))).toBe("replay");
+    expect(demoMode(parseEnv({ DATABASE_URL: "x", PUBLIC_DEMO: "true" }))).toBe("replay");
+    expect(demoMode(parseEnv({ DATABASE_URL: "x" }))).toBe("live"); // PUBLIC_DEMO defaults to false
     expect(demoMode(parseEnv({ DATABASE_URL: "x", PUBLIC_DEMO: "false" }))).toBe("live");
     expect(demoMode(parseEnv({ DATABASE_URL: "x", DEMO_MODE: "live" }))).toBe("live");
   });

@@ -115,7 +115,8 @@ export const envSchema = z.object({
   // Auth / demo
   ADMIN_PASSWORD: optionalString,
   SESSION_SECRET: optionalString,
-  PUBLIC_DEMO: bool(true),
+  // Private by default: the dashboard shows real leads. Only a demo deployment sets true.
+  PUBLIC_DEMO: bool(false),
   // Public demo deployments: always use the built-in calendar / CRM / email, even if real
   // integration keys are present. Real integrations are demoed from a local run instead.
   PUBLIC_DEMO_FORCE_MOCK: bool(false),
