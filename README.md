@@ -6,6 +6,10 @@ Ollama), asks for missing details, books a meeting
 when the lead fits, updates your CRM and sends the follow-up email — and shows every decision it
 made in a live, inspectable agent trace.**
 
+**Live demo: [leadpilot-gules.vercel.app](https://leadpilot-gules.vercel.app)** — a read-only public
+demo: contact details are masked, and "Simulate lead" replays recorded runs of a real model, so it
+makes no model calls.
+
 Leads come in from an embeddable web form, email replies, or any automation tool (n8n, Zapier, Make)
 via a signed webhook. Runs in **demo mode** with just a Postgres URL and a model — a local model via
 Ollama costs nothing; add Google Calendar, HubSpot and Resend keys to switch to the real integrations.
